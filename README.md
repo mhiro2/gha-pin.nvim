@@ -14,6 +14,9 @@ it does not try to fully parse YAML nor replace Dependabot/Renovate.
 - **Cache**: TTL-based cache (default: 6 hours)
 - **Auth / transport**: uses [GitHub CLI (`gh`)](https://cli.github.com/) via `gh api` when available; falls back to `curl` + `GITHUB_TOKEN`
 
+![movie](https://github.com/user-attachments/assets/74f12504-96e6-41c3-8ff6-339af2f5aab7)
+
+
 ## Requirements
 
 - Neovim >= 0.9
