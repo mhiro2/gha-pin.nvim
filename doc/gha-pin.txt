@@ -1,0 +1,157 @@
+*gha-pin.txt*  Inspect and update pinned SHAs in GitHub Actions workflows
+
+==============================================================================
+CONTENTS                                                       *gha-pin*
+
+  1. Introduction ................................... |gha-pin-introduction|
+  2. Commands ......................................... |gha-pin-commands|
+  3. Configuration ................................... |gha-pin-configuration|
+  4. Supported patterns ............................... |gha-pin-patterns|
+  5. Cache ............................................. |gha-pin-cache|
+  6. Auth / transport .................................. |gha-pin-auth|
+  7. Notes / limitations ............................... |gha-pin-notes|
+
+==============================================================================
+1. INTRODUCTION                                       *gha-pin-introduction*
+
+gha-pin.nvim inspects GitHub Actions workflow files and helps you keep
+pinned SHAs up-to-date.
+
+The MVP focuses on this pattern only:
+
+  uses: owner/repo@<full-commit-sha>
+
+It shows:
+
+- diagnostics when a pinned SHA is not the latest
+- virtual text with the latest ref (best-effort)
+- commands to update the SHA in-place
+
+Help tags:
+  :h gha-pin
+
+==============================================================================
+2. COMMANDS                                             *gha-pin-commands*
+
+                                                        *:GhaPinCheck*
+:GhaPinCheck
+  Parse the current buffer and update diagnostics + virtual text.
+
+                                                        *:GhaPinFix*
+:GhaPinFix
+  Update outdated pins to the latest SHA (whole buffer).
+
+                                                        *:GhaPinExplain*
+:GhaPinExplain
+  Show resolution details for the pinned `uses:` under cursor.
+
+                                                     *:GhaPinCacheClear*
+:GhaPinCacheClear
+  Clear the on-disk cache.
+
+==============================================================================
+3. CONFIGURATION                                   *gha-pin-configuration*
+
+Call setup() once (optional). If you don't, defaults are used.
+
+Example:
+
+  require("gha-pin").setup({
+    virtual_text = true,
+    ttl_seconds = 6 * 60 * 60,
+    github = {
+      api_base_url = "https://api.github.com",
+      prefer_gh = true,
+      token_env = "GITHUB_TOKEN",
+    },
+    auto_check = {
+      enabled = false,
+      debounce_ms = 700,
+    },
+  })
+
+Options:
+
+virtual_text (boolean, default: true)
+  Show virtual text at end-of-line: `# Latest: <tag> <sha7>`.
+
+ttl_seconds (integer, default: 21600)
+  Cache TTL in seconds.
+
+github.api_base_url (string, default: https://api.github.com)
+  GitHub API base URL (supports GHE if compatible with the endpoints used).
+
+github.prefer_gh (boolean, default: true)
+  If true and `gh` is available, use `gh api` on github.com.
+
+github.token_env (string, default: GITHUB_TOKEN)
+  Environment variable name for PAT/token used with curl fallback.
+
+auto_check.enabled (boolean, default: false)
+  If true, automatically runs check on BufEnter / BufWritePost for workflow
+  files under `/.github/workflows/*.yml|yaml`.
+
+auto_check.debounce_ms (integer, default: 700)
+  Debounce window for auto_check.
+
+==============================================================================
+4. SUPPORTED PATTERNS                                   *gha-pin-patterns*
+
+Included (MVP):
+  - uses: owner/repo@<full-commit-sha>
+  - uses: owner/repo/path@<full-commit-sha>
+
+Ignored (MVP):
+  - uses: ./path
+  - uses: docker://...
+  - uses: ...@${{ ... }}   (dynamic)
+  - uses: owner/repo@v4    (tag refs, future work)
+
+==============================================================================
+5. CACHE                                                   *gha-pin-cache*
+
+Cache path:
+  stdpath("cache") .. "/gha-pin.nvim/cache.json"
+
+The cache stores only:
+  - repo identifier
+  - resolved latest tag (if any)
+  - resolved latest commit SHA
+  - timestamp
+
+Tokens are never written to disk.
+
+==============================================================================
+6. AUTH / TRANSPORT                                        *gha-pin-auth*
+
+Resolution strategy (best-effort):
+  1) latest release:
+     GET /repos/{owner}/{repo}/releases/latest  -> tag_name
+     GET /repos/{owner}/{repo}/git/ref/tags/{tag}
+       - if annotated tag, resolve via GET /repos/.../git/tags/{sha}
+  2) fallback: tags list
+     GET /repos/{owner}/{repo}/tags?per_page=1
+
+Failure behavior (best-effort):
+  - If resolution fails (network/auth/rate limit/etc.), the plugin does not
+    emit "outdated" diagnostics for that `uses:`.
+  - Virtual text may show `# Latest: (resolve failed)`.
+  - Use :GhaPinExplain to see the last error (if any) for the repo under cursor.
+
+Transport priority:
+  1) `gh api` (when available and api_base_url is github.com)
+  2) `curl` with token from $GITHUB_TOKEN (configurable)
+  3) unauthenticated (may hit rate limits quickly)
+
+==============================================================================
+7. NOTES / LIMITATIONS                                     *gha-pin-notes*
+
+- YAML parsing is best-effort (simple line scanning).
+- Inline comments are stripped naïvely.
+- The plugin does not currently map pinned SHA -> exact release/tag.
+- For tag refs like `@v4`, support can be added later (tag -> SHA conversion).
+
+==============================================================================
+vim:tw=78:ts=8:noet:ft=help:norl
+
+
