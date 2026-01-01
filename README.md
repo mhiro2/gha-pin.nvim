@@ -1,5 +1,8 @@
 # gha-pin.nvim
 
+[![GitHub Release](https://img.shields.io/github/release/mhiro2/gha-pin.nvim?style=flat)](https://github.com/mhiro2/gha-pin.nvim/releases/latest)
+[![CI](https://github.com/mhiro2/gha-pin.nvim/actions/workflows/ci.yaml/badge.svg)](https://github.com/mhiro2/gha-pin.nvim/actions/workflows/ci.yaml)
+
 Inspect and update **pinned SHAs** in GitHub Actions workflows (`uses: owner/repo@<full-commit-sha>`) directly from Neovim.
 
 This plugin is intentionally **best-effort** and optimized for day-to-day use in small repos:
