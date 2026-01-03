@@ -6,7 +6,7 @@
 Inspect and update **pinned SHAs** in GitHub Actions workflows (`uses: owner/repo@<full-commit-sha>`) directly from Neovim.
 
 This plugin is lightweight and practical for day-to-day use.
-It parses workflow files line-by-line (not a full YAML parser) and is not intended to replace Dependabot/Renovate.
+It parses workflow/action files line-by-line (not a full YAML parser) and is not intended to replace Dependabot/Renovate.
 
 ## Motivation
 
@@ -21,6 +21,7 @@ See: [Security hardening for GitHub Actions - GitHub Docs](https://docs.github.c
 - **Explain**: shows what the plugin resolved for the `uses:` under cursor
 - **Cache**: TTL-based cache (default: 6 hours)
 - **Auth / transport**: uses [GitHub CLI (`gh`)](https://cli.github.com/) via `gh api` when available; falls back to `curl` + `GITHUB_TOKEN`
+- **Auto check targets**: workflows and composite action metadata files (`.github/actions/**/action.yml|yaml`)
 
 ![movie](https://github.com/user-attachments/assets/74f12504-96e6-41c3-8ff6-339af2f5aab7)
 
@@ -117,7 +118,7 @@ require("gha-pin").setup({
 
 ### auto_check notes
 
-- `auto_check` runs only for workflow files under `.github/workflows/*.yml|yaml`.
+- `auto_check` runs only for workflow files under `.github/workflows/*.yml|yaml` and action metadata files under `.github/actions/**/action.yml|yaml`.
 - If you feel this is too noisy/heavy, keep it disabled and run `:GhaPinCheck` manually, or increase `ttl_seconds`.
 
 ## Cache

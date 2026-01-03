@@ -135,7 +135,21 @@ local function is_workflow_file(path)
   if not path or path == "" then
     return false
   end
-  return path:find("/.github/workflows/", 1, true) ~= nil and (path:match("%.ya?ml$") ~= nil)
+  if path:find("/.github/workflows/", 1, true) ~= nil and (path:match("%.ya?ml$") ~= nil) then
+    return true
+  end
+  -- Composite action metadata under .github/actions/**/action.yml|yaml
+  if path:match("/%.github/actions/.+/action%.ya?ml$") ~= nil then
+    return true
+  end
+  return false
+end
+
+-- internal: expose for tests
+---@param path string|nil
+---@return boolean
+function M._is_target_file(path)
+  return is_workflow_file(path)
 end
 
 ---@param key string
