@@ -17,14 +17,14 @@ CONTENTS                                                       *gha-pin*
 gha-pin.nvim inspects GitHub Actions workflow files and helps you keep
 pinned SHAs up-to-date.
 
-The MVP focuses on this pattern only:
+This plugin focuses on this pattern only:
 
   uses: owner/repo@<full-commit-sha>
 
 It shows:
 
 - diagnostics when a pinned SHA is not the latest
-- virtual text with the latest ref (best-effort)
+- virtual text with the latest ref (when resolvable)
 - commands to update the SHA in-place
 
 Help tags:
@@ -97,15 +97,15 @@ auto_check.debounce_ms (integer, default: 700)
 ==============================================================================
 4. SUPPORTED PATTERNS                                   *gha-pin-patterns*
 
-Included (MVP):
+Included:
   - uses: owner/repo@<full-commit-sha>
   - uses: owner/repo/path@<full-commit-sha>
 
-Ignored (MVP):
+Ignored:
   - uses: ./path
   - uses: docker://...
   - uses: ...@${{ ... }}   (dynamic)
-  - uses: owner/repo@v4    (tag refs, future work)
+  - uses: owner/repo@v4    (tag refs not supported yet)
 
 ==============================================================================
 5. CACHE                                                   *gha-pin-cache*
@@ -124,7 +124,7 @@ Tokens are never written to disk.
 ==============================================================================
 6. AUTH / TRANSPORT                                        *gha-pin-auth*
 
-Resolution strategy (best-effort):
+Resolution strategy:
   1) latest release:
      GET /repos/{owner}/{repo}/releases/latest  -> tag_name
      GET /repos/{owner}/{repo}/git/ref/tags/{tag}
@@ -132,7 +132,7 @@ Resolution strategy (best-effort):
   2) fallback: tags list
      GET /repos/{owner}/{repo}/tags?per_page=1
 
-Failure behavior (best-effort):
+Failure behavior:
   - If resolution fails (network/auth/rate limit/etc.), the plugin does not
     emit "outdated" diagnostics for that `uses:`.
   - Virtual text may show `# Latest: (resolve failed)`.
@@ -146,12 +146,10 @@ Transport priority:
 ==============================================================================
 7. NOTES / LIMITATIONS                                     *gha-pin-notes*
 
-- YAML parsing is best-effort (simple line scanning).
-- Inline comments are stripped naïvely.
-- The plugin does not currently map pinned SHA -> exact release/tag.
-- For tag refs like `@v4`, support can be added later (tag -> SHA conversion).
+- YAML parsing is line-based; this is not a full YAML parser.
+- Inline comments are stripped with a simple heuristic.
+- The plugin does not map pinned SHA -> exact release/tag.
+- Tag refs like `@v4` are not supported (tag -> SHA conversion).
 
 ==============================================================================
 vim:tw=78:ts=8:noet:ft=help:norl
-
-

@@ -33,7 +33,7 @@ local function extract_uses_token(line)
     return nil, nil, nil
   end
 
-  -- strip inline comment (naive; ok for MVP)
+  -- strip inline comment (naive; ok for now)
   local without_comment = m:gsub("%s+#.*$", "")
   local raw_token = util.trim(without_comment)
   if raw_token == "" then
