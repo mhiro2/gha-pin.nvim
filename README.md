@@ -16,7 +16,7 @@ See: [Security hardening for GitHub Actions - GitHub Docs](https://docs.github.c
 ## Features
 
 - **Diagnostics**: warns when a pinned SHA is not the latest (default policy: latest release)
-- **Virtual text**: shows `# Latest: <tag> <sh>` at end of line (default ON)
+- **Virtual text**: shows `# Latest: <tag> <short-commit-sha>` at end of line (default ON)
 - **Fix**: updates outdated pins to the latest SHA (whole buffer or range)
 - **Explain**: shows what the plugin resolved for the `uses:` under cursor
 - **Cache**: TTL-based cache (default: 6 hours)
