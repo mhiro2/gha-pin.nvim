@@ -9,9 +9,10 @@ local M = {}
 ---@field token_env string
 
 ---@class GhaPinGithubResult
----@field latest_tag string|nil
----@field latest_sha string|nil
----@field source string|nil
+---@field latest_tag string|nil Latest tag name (e.g., "v1.2.3")
+---@field latest_sha string|nil Full 40-char commit SHA, or "" if within cooldown period (not eligible yet)
+---@field source string|nil Source: "release", "tags", or "cache"
+---@field published_at string|nil ISO 8601 timestamp from tagger.date (annotated) or commit date (lightweight)
 
 ---@param s string
 ---@return boolean
@@ -134,17 +135,72 @@ end
 ---@param cfg GhaPinGithubConfig
 ---@param owner string
 ---@param repo string
----@param tag string
----@param cb fun(commit_sha: string|nil, err: string|nil)
-local function resolve_tag_to_commit_sha(cfg, owner, repo, tag, cb)
-  local tag_enc = util.uri_encode_path_segment(tag)
-  request_json(cfg, ("repos/%s/%s/git/ref/tags/%s"):format(owner, repo, tag_enc), function(data, err)
+---@param tag_sha string
+---@param cb fun(timestamp: string|nil, err: string|nil)
+local function get_tag_timestamp(cfg, owner, repo, tag_sha, cb)
+  request_json(cfg, ("repos/%s/%s/git/tags/%s"):format(owner, repo, tag_sha), function(data, err)
     if err then
       cb(nil, err)
       return
     end
+    if type(data) ~= "table" then
+      cb(nil, "Unexpected response for git/tags")
+      return
+    end
+    -- Annotated tags have 'tagger.date', lightweight tags don't
+    if type(data.tagger) == "table" and type(data.tagger.date) == "string" then
+      cb(data.tagger.date, nil)
+    else
+      -- Missing tagger info - return nil so caller can decide fallback
+      cb(nil, nil)
+    end
+  end)
+end
+
+---@param cfg GhaPinGithubConfig
+---@param owner string
+---@param repo string
+---@param commit_sha string
+---@param cb fun(timestamp: string|nil, err: string|nil)
+local function get_commit_timestamp(cfg, owner, repo, commit_sha, cb)
+  request_json(cfg, ("repos/%s/%s/commits/%s"):format(owner, repo, commit_sha), function(data, err)
+    if err then
+      cb(nil, err)
+      return
+    end
+    if type(data) ~= "table" or type(data.commit) ~= "table" then
+      cb(nil, "Unexpected response for commits")
+      return
+    end
+    local commit = data.commit
+    local committer = type(commit.committer) == "table" and commit.committer or nil
+    local author = type(commit.author) == "table" and commit.author or nil
+    if committer and type(committer.date) == "string" then
+      cb(committer.date, nil)
+      return
+    end
+    if author and type(author.date) == "string" then
+      cb(author.date, nil)
+      return
+    end
+    cb(nil, nil)
+  end)
+end
+
+---@param cfg GhaPinGithubConfig
+---@param owner string
+---@param repo string
+---@param tag string
+---@param cb fun(commit_sha: string|nil, tag_sha: string|nil, err: string|nil)
+local function resolve_tag_to_commit_sha(cfg, owner, repo, tag, cb)
+  local tag_enc = util.uri_encode_path_segment(tag)
+  request_json(cfg, ("repos/%s/%s/git/ref/tags/%s"):format(owner, repo, tag_enc), function(data, err)
+    if err then
+      cb(nil, nil, err)
+      return
+    end
     if type(data) ~= "table" or type(data.object) ~= "table" then
-      cb(nil, "Unexpected response for git ref tag")
+      cb(nil, nil, "Unexpected response for git ref tag")
       return
     end
 
@@ -152,16 +208,17 @@ local function resolve_tag_to_commit_sha(cfg, owner, repo, tag, cb)
     local obj_type = obj.type
     local sha = obj.sha
     if type(obj_type) ~= "string" or type(sha) ~= "string" then
-      cb(nil, "Tag ref missing object.type/object.sha")
+      cb(nil, nil, "Tag ref missing object.type/object.sha")
       return
     end
 
     if obj_type == "commit" then
       if not is_hex40(sha) then
-        cb(nil, "Invalid commit SHA in tag ref")
+        cb(nil, nil, "Invalid commit SHA in tag ref")
         return
       end
-      cb(sha, nil)
+      -- Lightweight tag: commit SHA is the tag SHA, no tagger.date
+      cb(sha, nil, nil)
       return
     end
 
@@ -169,38 +226,39 @@ local function resolve_tag_to_commit_sha(cfg, owner, repo, tag, cb)
     if obj_type == "tag" then
       local function step(tag_sha, depth)
         if depth > 3 then
-          cb(nil, "Tag resolution exceeded max depth")
+          cb(nil, nil, "Tag resolution exceeded max depth")
           return
         end
         request_json(cfg, ("repos/%s/%s/git/tags/%s"):format(owner, repo, tag_sha), function(tag_obj, err2)
           if err2 then
-            cb(nil, err2)
+            cb(nil, nil, err2)
             return
           end
           if type(tag_obj) ~= "table" or type(tag_obj.object) ~= "table" then
-            cb(nil, "Unexpected response for git tag object")
+            cb(nil, nil, "Unexpected response for git tag object")
             return
           end
           local inner = tag_obj.object
           local t = inner.type
           local s = inner.sha
           if type(t) ~= "string" or type(s) ~= "string" then
-            cb(nil, "Tag object missing inner object")
+            cb(nil, nil, "Tag object missing inner object")
             return
           end
           if t == "commit" then
             if not is_hex40(s) then
-              cb(nil, "Invalid commit SHA in tag object")
+              cb(nil, nil, "Invalid commit SHA in tag object")
               return
             end
-            cb(s, nil)
+            -- Return commit SHA and the first tag SHA (for timestamp lookup)
+            cb(s, sha, nil)
             return
           end
           if t == "tag" then
             step(s, depth + 1)
             return
           end
-          cb(nil, "Unsupported tag object type: " .. t)
+          cb(nil, nil, "Unsupported tag object type: " .. t)
         end)
       end
 
@@ -208,7 +266,7 @@ local function resolve_tag_to_commit_sha(cfg, owner, repo, tag, cb)
       return
     end
 
-    cb(nil, "Unsupported ref object.type: " .. obj_type)
+    cb(nil, nil, "Unsupported ref object.type: " .. obj_type)
   end)
 end
 
@@ -243,19 +301,21 @@ local function fallback_latest_tag(cfg, owner, repo, cb)
 end
 
 ---@param cfg GhaPinGithubConfig
+---@param minimum_age_seconds integer
 ---@param owner string
 ---@param repo string
 ---@param cb fun(result: GhaPinGithubResult|nil, err: string|nil)
-function M.resolve_latest(cfg, owner, repo, cb)
+function M.resolve_latest(cfg, minimum_age_seconds, owner, repo, cb)
   get_latest_release_tag(cfg, owner, repo, function(tag, err)
     if err then
       if is_not_found(err) then
+        -- Tags fallback: no cooldown per user preference
         fallback_latest_tag(cfg, owner, repo, function(tag2, sha2, err2)
           if err2 then
             cb(nil, err2)
             return
           end
-          cb({ latest_tag = tag2, latest_sha = sha2, source = "tags" }, nil)
+          cb({ latest_tag = tag2, latest_sha = sha2, source = "tags", published_at = nil }, nil)
         end)
         return
       end
@@ -263,7 +323,7 @@ function M.resolve_latest(cfg, owner, repo, cb)
       return
     end
 
-    resolve_tag_to_commit_sha(cfg, owner, repo, tag, function(sha, err2)
+    resolve_tag_to_commit_sha(cfg, owner, repo, tag, function(sha, tag_sha, err2)
       if err2 then
         -- if release exists but tag ref can't be resolved, try tags list as last resort
         fallback_latest_tag(cfg, owner, repo, function(tag2, sha2, err3)
@@ -271,11 +331,47 @@ function M.resolve_latest(cfg, owner, repo, cb)
             cb(nil, err2)
             return
           end
-          cb({ latest_tag = tag2, latest_sha = sha2, source = "tags" }, nil)
+          cb({ latest_tag = tag2, latest_sha = sha2, source = "tags", published_at = nil }, nil)
         end)
         return
       end
-      cb({ latest_tag = tag, latest_sha = sha, source = "release" }, nil)
+
+      local function apply_cooldown(timestamp)
+        if minimum_age_seconds > 0 and timestamp then
+          local age = util.timestamp_age_seconds(timestamp)
+          if age < minimum_age_seconds then
+            -- Within cooldown period - return empty sha to indicate not eligible
+            cb({ latest_tag = tag, latest_sha = "", source = "release", published_at = timestamp }, nil)
+            return
+          end
+        end
+        cb({ latest_tag = tag, latest_sha = sha, source = "release", published_at = timestamp }, nil)
+      end
+
+      if minimum_age_seconds > 0 then
+        if tag_sha then
+          get_tag_timestamp(cfg, owner, repo, tag_sha, function(timestamp, _ts_err)
+            if timestamp then
+              apply_cooldown(timestamp)
+              return
+            end
+            -- Fallback to commit timestamp when tagger.date is unavailable
+            get_commit_timestamp(cfg, owner, repo, sha, function(commit_ts, _commit_err)
+              apply_cooldown(commit_ts)
+            end)
+          end)
+          return
+        end
+
+        -- Lightweight tag: use commit timestamp for cooldown
+        get_commit_timestamp(cfg, owner, repo, sha, function(commit_ts, _commit_err)
+          apply_cooldown(commit_ts)
+        end)
+        return
+      end
+
+      -- No cooldown requested
+      cb({ latest_tag = tag, latest_sha = sha, source = "release", published_at = nil }, nil)
     end)
   end)
 end
