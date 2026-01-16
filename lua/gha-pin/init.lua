@@ -129,6 +129,29 @@ local function as_string(v, fallback)
   return fallback
 end
 
+---@param owner_or_repo string
+---@return boolean
+local function is_valid_owner_or_repo(owner_or_repo)
+  -- GitHub owner/repo names can only contain: alphanumeric, hyphen, underscore, dot
+  -- Reject special characters that could be used for injection attacks
+  return type(owner_or_repo) == "string"
+    and owner_or_repo:match("^[a-zA-Z0-9._-]+$") ~= nil
+    and owner_or_repo:match("%.%.") == nil -- Reject ".." (path traversal attempt)
+end
+
+---@param url string
+---@param fallback string
+---@return string
+local function as_https_url(url, fallback)
+  local validated = as_string(url, fallback)
+  -- Ensure URL starts with https:// to prevent insecure HTTP usage
+  if validated:match("^https://") then
+    return validated
+  end
+  util.notify(("api_base_url must use HTTPS, falling back to %s"):format(fallback), vim.log.levels.WARN)
+  return fallback
+end
+
 ---@param user_cfg any
 ---@return table
 local function normalize_user_cfg(user_cfg)
@@ -153,7 +176,7 @@ local function validate_cfg(cfg)
   if type(cfg.github) ~= "table" then
     cfg.github = vim.deepcopy(defaults.github)
   end
-  cfg.github.api_base_url = as_string(cfg.github.api_base_url, defaults.github.api_base_url)
+  cfg.github.api_base_url = as_https_url(cfg.github.api_base_url, defaults.github.api_base_url)
   cfg.github.prefer_gh = as_bool(cfg.github.prefer_gh, defaults.github.prefer_gh)
   cfg.github.token_env = as_string(cfg.github.token_env, defaults.github.token_env)
 
@@ -201,6 +224,15 @@ end
 ---@param repo string
 ---@param cb fun(res: GhaPinGithubResult|nil, err: string|nil)
 local function resolve_repo(key, owner, repo, cb)
+  -- Validate owner/repo to prevent command injection
+  if not is_valid_owner_or_repo(owner) then
+    cb(nil, ("Invalid owner name: %s"):format(owner))
+    return
+  end
+  if not is_valid_owner_or_repo(repo) then
+    cb(nil, ("Invalid repo name: %s"):format(repo))
+    return
+  end
   local entry = cache.get_if_fresh(state.cache, key, state.cfg.ttl_seconds)
   if entry and entry.latest_sha and entry.latest_sha ~= "" then
     -- Check cooldown for cached releases

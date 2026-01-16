@@ -47,6 +47,9 @@ function M.load()
 
   local ok2, decoded = pcall(json_decode, table.concat(lines, "\n"))
   if not ok2 or type(decoded) ~= "table" then
+    if not ok2 then
+      vim.notify("gha-pin.nvim: Failed to decode cache file, using empty cache", vim.log.levels.WARN)
+    end
     return { version = 1, entries = {} }
   end
 
@@ -58,8 +61,15 @@ end
 ---@param cache GhaPinCache
 function M.save(cache)
   local path = cache_file()
-  local encoded = json_encode(cache)
-  vim.fn.writefile({ encoded }, path)
+  local ok, encoded = pcall(json_encode, cache)
+  if not ok then
+    vim.notify(("gha-pin.nvim: Failed to encode cache: %s"):format(tostring(encoded)), vim.log.levels.WARN)
+    return
+  end
+  local ok2, err = pcall(vim.fn.writefile, { encoded }, path)
+  if not ok2 then
+    vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(err)), vim.log.levels.WARN)
+  end
 end
 
 ---@param host string
