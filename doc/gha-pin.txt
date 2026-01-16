@@ -59,6 +59,7 @@ Example:
   require("gha-pin").setup({
     virtual_text = true,
     ttl_seconds = 6 * 60 * 60,
+    minimum_release_age_seconds = 0,
     github = {
       api_base_url = "https://api.github.com",
       prefer_gh = true,
@@ -77,6 +78,15 @@ virtual_text (boolean, default: true)
 
 ttl_seconds (integer, default: 21600)
   Cache TTL in seconds.
+
+minimum_release_age_seconds (integer, default: 0)
+  Optional cooldown period for releases. If the latest release's tag is newer
+  than this age (in seconds), it's treated as "not eligible yet" and no
+  diagnostic is shown. Default 0 means disabled - all releases are immediately
+  eligible. Only applies to releases (from /releases/latest), not tags fallback.
+  Uses the tag's tagger.date for annotated tags; for lightweight tags it uses
+  the commit date (commit.committer.date, fallback to commit.author.date).
+  Repos without releases are always eligible.
 
 github.api_base_url (string, default: https://api.github.com)
   GitHub API base URL (supports GHE if compatible with the endpoints used).

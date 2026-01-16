@@ -54,6 +54,31 @@ function M.sha7(s)
   return s:sub(1, 7)
 end
 
+---@param timestamp string ISO 8601 timestamp from GitHub API (e.g., "2024-01-15T10:30:00Z").
+--                      Supports format: YYYY-MM-DDTHH:MM:SS (milliseconds and timezone offset ignored).
+---@return integer age in seconds (0 for invalid timestamps)
+function M.timestamp_age_seconds(timestamp)
+  -- Parse ISO 8601 timestamp
+  local pattern = "^(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)"
+  local year, month, day, hour, min, sec = timestamp:match(pattern)
+  if not year then
+    return 0 -- Invalid timestamp, treat as old
+  end
+
+  local dt = {
+    year = tonumber(year),
+    month = tonumber(month),
+    day = tonumber(day),
+    hour = tonumber(hour),
+    min = tonumber(min),
+    sec = tonumber(sec),
+  }
+
+  local published_epoch = os.time(dt)
+  local now = os.time()
+  return now - published_epoch
+end
+
 ---@param msg string
 ---@param level? integer
 function M.notify(msg, level)

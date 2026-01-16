@@ -82,6 +82,23 @@ By default, this plugin resolves "latest" as the **latest release** when availab
 > [!NOTE]
 > Depending on the repo's release/tag conventions, the resolved SHA may not match your expectation.
 
+### Release Cooldown (Optional)
+
+To avoid pinning to brand-new releases that may be unstable, you can enable a cooldown period:
+
+```lua
+require("gha-pin").setup({
+  minimum_release_age_seconds = 604800,  -- Wait 1 week after release
+})
+```
+
+- **Behavior**: If the latest release's tag is newer than the configured age, it's treated as "not eligible yet" (no diagnostic shown).
+- **Default**: `0` (disabled) - all releases are immediately eligible.
+- **Notes**:
+  - Only applies to releases (from `/releases/latest`), not tags fallback.
+  - Uses the tag's `tagger.date` for annotated tags; for lightweight tags it uses the commit date (`commit.committer.date`, fallback to `commit.author.date`).
+  - Repos without releases (tags fallback) are always eligible.
+
 ### Failure behavior
 
 - If resolution fails (network/auth/rate limit/etc.), the plugin will **not** add "outdated" diagnostics for that `uses:`.
@@ -104,6 +121,7 @@ By default, this plugin resolves "latest" as the **latest release** when availab
 require("gha-pin").setup({
   virtual_text = true,
   ttl_seconds = 6 * 60 * 60,
+  minimum_release_age_seconds = 0,  -- Optional: cooldown for releases
   github = {
     api_base_url = "https://api.github.com",
     prefer_gh = true,

@@ -18,6 +18,7 @@ local M = {}
 ---@field enabled boolean
 ---@field virtual_text boolean
 ---@field ttl_seconds integer
+---@field minimum_release_age_seconds integer
 ---@field github GhaPinGithubConfig
 ---@field auto_check { enabled: boolean, debounce_ms: integer }
 
@@ -25,6 +26,7 @@ local defaults = {
   enabled = true,
   virtual_text = true,
   ttl_seconds = 6 * 60 * 60,
+  minimum_release_age_seconds = 0,
   github = {
     api_base_url = "https://api.github.com",
     prefer_gh = true,
@@ -76,6 +78,47 @@ local function as_nonneg_int(v, fallback)
   return fallback
 end
 
+---@param seconds integer
+---@return string
+local function format_duration(seconds)
+  local s = math.max(0, math.floor(seconds or 0))
+  local days = math.floor(s / 86400)
+  s = s % 86400
+  local hours = math.floor(s / 3600)
+  s = s % 3600
+  local mins = math.floor(s / 60)
+
+  local parts = {}
+  if days > 0 then
+    table.insert(parts, days .. "d")
+  end
+  if hours > 0 and #parts < 2 then
+    table.insert(parts, hours .. "h")
+  end
+  if mins > 0 and #parts < 2 then
+    table.insert(parts, mins .. "m")
+  end
+  if #parts == 0 then
+    table.insert(parts, "0m")
+  end
+  return table.concat(parts, " ")
+end
+
+---@param published_at string|nil
+---@param minimum_age_seconds integer
+---@return string
+local function cooldown_suffix(published_at, minimum_age_seconds)
+  if not published_at or minimum_age_seconds <= 0 then
+    return " (cooldown)"
+  end
+  local age = util.timestamp_age_seconds(published_at)
+  local remaining = minimum_age_seconds - age
+  if remaining <= 0 then
+    return " (cooldown)"
+  end
+  return (" (cooldown %s left)"):format(format_duration(remaining))
+end
+
 ---@param v any
 ---@param fallback string
 ---@return string
@@ -105,6 +148,7 @@ local function validate_cfg(cfg)
   cfg.enabled = as_bool(cfg.enabled, defaults.enabled)
   cfg.virtual_text = as_bool(cfg.virtual_text, defaults.virtual_text)
   cfg.ttl_seconds = as_nonneg_int(cfg.ttl_seconds, defaults.ttl_seconds)
+  cfg.minimum_release_age_seconds = as_nonneg_int(cfg.minimum_release_age_seconds, defaults.minimum_release_age_seconds)
 
   if type(cfg.github) ~= "table" then
     cfg.github = vim.deepcopy(defaults.github)
@@ -159,7 +203,21 @@ end
 local function resolve_repo(key, owner, repo, cb)
   local entry = cache.get_if_fresh(state.cache, key, state.cfg.ttl_seconds)
   if entry and entry.latest_sha and entry.latest_sha ~= "" then
-    cb({ latest_tag = entry.latest_tag, latest_sha = entry.latest_sha, source = "cache" }, nil)
+    -- Check cooldown for cached releases
+    if state.cfg.minimum_release_age_seconds > 0 and entry.published_at then
+      local age = util.timestamp_age_seconds(entry.published_at)
+      if age < state.cfg.minimum_release_age_seconds then
+        -- Within cooldown period - treat as not eligible yet
+        cb({ latest_tag = entry.latest_tag, latest_sha = "", source = "cache", published_at = entry.published_at }, nil)
+        return
+      end
+    end
+    cb({
+      latest_tag = entry.latest_tag,
+      latest_sha = entry.latest_sha,
+      source = "cache",
+      published_at = entry.published_at,
+    }, nil)
     return
   end
 
@@ -169,9 +227,10 @@ local function resolve_repo(key, owner, repo, cb)
   end
 
   state.inflight[key] = { cbs = { cb } }
-  github.resolve_latest(state.cfg.github, owner, repo, function(res, err)
-    if res and res.latest_sha then
-      cache.put(state.cache, key, res.latest_tag, res.latest_sha)
+  github.resolve_latest(state.cfg.github, state.cfg.minimum_release_age_seconds, owner, repo, function(res, err)
+    -- Store result including published_at (even if latest_sha is empty due to cooldown)
+    if res then
+      cache.put(state.cache, key, res.latest_tag, res.latest_sha, res.published_at)
       pcall(cache.save, state.cache)
     end
 
@@ -235,7 +294,20 @@ local function render(bufnr, refs, repo_result, repo_err)
     local latest = repo_result[key]
     local err = repo_err[key]
 
-    if latest and latest.latest_sha and latest.latest_sha ~= "" then
+    if latest and latest.latest_sha == "" then
+      if not virt_by_lnum[r.lnum] then
+        local text = ""
+        if latest.latest_tag then
+          text = ("# Latest: %s%s"):format(
+            latest.latest_tag,
+            cooldown_suffix(latest.published_at, state.cfg.minimum_release_age_seconds)
+          )
+        else
+          text = "# Latest: (cooldown)"
+        end
+        virt_by_lnum[r.lnum] = text
+      end
+    elseif latest and latest.latest_sha and latest.latest_sha ~= "" then
       -- SHA mismatch diagnostic
       if r.sha ~= latest.latest_sha then
         table.insert(outdated, {
@@ -489,11 +561,26 @@ function M.explain(bufnr)
     ("Repo:   %s/%s"):format(ref.owner, ref.repo),
     ("Pinned: %s"):format(util.sha7(ref.sha)),
   }
-  if latest and latest.latest_sha then
+  if latest and latest.latest_sha and latest.latest_sha ~= "" then
     if latest.latest_tag then
       table.insert(lines, ("Latest:  %s %s"):format(latest.latest_tag, util.sha7(latest.latest_sha)))
     else
       table.insert(lines, ("Latest:  %s"):format(util.sha7(latest.latest_sha)))
+    end
+    if latest.source then
+      table.insert(lines, ("Source: %s"):format(latest.source))
+    end
+  elseif latest and latest.latest_sha == "" then
+    if latest.latest_tag then
+      table.insert(
+        lines,
+        ("Latest:  %s%s"):format(
+          latest.latest_tag,
+          cooldown_suffix(latest.published_at, state.cfg.minimum_release_age_seconds)
+        )
+      )
+    else
+      table.insert(lines, "Latest:  (cooldown)")
     end
     if latest.source then
       table.insert(lines, ("Source: %s"):format(latest.source))

@@ -7,6 +7,7 @@ local M = {}
 ---@field latest_tag string|nil
 ---@field latest_sha string|nil
 ---@field pinned_map table<string, string>|nil
+---@field published_at string|nil
 
 ---@class GhaPinCache
 ---@field version integer
@@ -92,11 +93,13 @@ end
 ---@param key string
 ---@param latest_tag string|nil
 ---@param latest_sha string|nil
-function M.put(cache, key, latest_tag, latest_sha)
+---@param published_at string|nil
+function M.put(cache, key, latest_tag, latest_sha, published_at)
   cache.entries[key] = {
     checked_at = os.time(),
     latest_tag = latest_tag,
     latest_sha = latest_sha,
+    published_at = published_at,
   }
 end
 
