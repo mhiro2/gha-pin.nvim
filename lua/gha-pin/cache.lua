@@ -13,10 +13,14 @@ local M = {}
 ---@field version integer
 ---@field entries table<string, GhaPinCacheEntry>
 
+---@return string
+local function cache_dir()
+  return vim.fn.stdpath("cache") .. "/gha-pin.nvim"
+end
+
+---@return string
 local function cache_file()
-  local dir = vim.fn.stdpath("cache") .. "/gha-pin.nvim"
-  vim.fn.mkdir(dir, "p")
-  return dir .. "/cache.json"
+  return cache_dir() .. "/cache.json"
 end
 
 ---@param s string
@@ -59,17 +63,101 @@ function M.load()
 end
 
 ---@param cache GhaPinCache
-function M.save(cache)
+---@param cb? fun(ok: boolean, err?: string)
+function M.save(cache, cb)
   local path = cache_file()
   local ok, encoded = pcall(json_encode, cache)
   if not ok then
     vim.notify(("gha-pin.nvim: Failed to encode cache: %s"):format(tostring(encoded)), vim.log.levels.WARN)
+    if cb then
+      cb(false, tostring(encoded))
+    end
     return
   end
-  local ok2, err = pcall(vim.fn.writefile, { encoded }, path)
-  if not ok2 then
-    vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(err)), vim.log.levels.WARN)
+
+  local fs = vim.uv
+  if not fs then
+    -- Fallback to sync write if libuv is not available
+    vim.fn.mkdir(cache_dir(), "p")
+    local ok2, err = pcall(vim.fn.writefile, { encoded }, path)
+    if not ok2 then
+      vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(err)), vim.log.levels.WARN)
+    end
+    if cb then
+      cb(ok2, ok2 and nil or tostring(err))
+    end
+    return
   end
+
+  local dir = cache_dir()
+
+  -- Ensure directory exists (async mkdir)
+  fs.fs_mkdir(dir, 448, function(mkdir_err)
+    if mkdir_err and mkdir_err:match("EEXIST") == nil then
+      vim.notify(
+        ("gha-pin.nvim: Failed to create cache directory: %s"):format(tostring(mkdir_err)),
+        vim.log.levels.WARN
+      )
+      if cb then
+        cb(false, tostring(mkdir_err))
+      end
+      return
+    end
+
+    -- Write to temporary file first (atomic write pattern)
+    local tmp_path = path .. ".tmp"
+    fs.fs_open(tmp_path, "w", 438, function(open_err, fd)
+      if open_err or not fd then
+        vim.notify(("gha-pin.nvim: Failed to open cache file: %s"):format(tostring(open_err)), vim.log.levels.WARN)
+        if cb then
+          cb(false, tostring(open_err))
+        end
+        return
+      end
+
+      fs.fs_write(fd, encoded, -1, function(write_err)
+        if write_err then
+          fs.fs_close(fd, function()
+            vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(write_err)), vim.log.levels.WARN)
+            if cb then
+              cb(false, tostring(write_err))
+            end
+          end)
+          return
+        end
+
+        fs.fs_close(fd, function(close_err)
+          if close_err then
+            vim.notify(
+              ("gha-pin.nvim: Failed to close cache file: %s"):format(tostring(close_err)),
+              vim.log.levels.WARN
+            )
+            if cb then
+              cb(false, tostring(close_err))
+            end
+            return
+          end
+
+          -- Atomic rename from temp to actual path
+          fs.fs_rename(tmp_path, path, function(rename_err)
+            if rename_err then
+              vim.notify(
+                ("gha-pin.nvim: Failed to rename cache file: %s"):format(tostring(rename_err)),
+                vim.log.levels.WARN
+              )
+              if cb then
+                cb(false, tostring(rename_err))
+              end
+              return
+            end
+            if cb then
+              cb(true)
+            end
+          end)
+        end)
+      end)
+    end)
+  end)
 end
 
 ---@param host string
