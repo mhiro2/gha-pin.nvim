@@ -66,7 +66,7 @@ This will verify:
 | Command | Description |
 | --- | --- |
 | `:GhaPinCheck` | Parse current buffer and update diagnostics/virtual text |
-| `:GhaPinFix` | Update outdated pins to latest SHA (whole buffer) |
+| `:GhaPinFix` | Update outdated pins to latest SHA (whole buffer or visual range) |
 | `:GhaPinExplain` | Show resolution details for `uses:` under cursor |
 | `:GhaPinCacheClear` | Clear cache |
 
