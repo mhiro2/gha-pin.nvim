@@ -263,7 +263,7 @@ local function resolve_repo(key, owner, repo, cb)
     -- Store result including published_at (even if latest_sha is empty due to cooldown)
     if res then
       cache.put(state.cache, key, res.latest_tag, res.latest_sha, res.published_at)
-      pcall(cache.save, state.cache)
+      cache.save(state.cache)
     end
 
     local cbs = state.inflight[key] and state.inflight[key].cbs or {}
