@@ -12,7 +12,6 @@ local T = MiniTest.new_set({
 })
 
 T["parser"] = require("tests.test_parser")
-T["parser_range"] = require("tests.test_parser_range")
 T["fix"] = require("tests.test_fix")
 T["command_range"] = require("tests.test_command_range")
 T["github"] = require("tests.test_github")

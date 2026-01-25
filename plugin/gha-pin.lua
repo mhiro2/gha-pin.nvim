@@ -10,6 +10,10 @@ vim.api.nvim_create_user_command("GhaPinCheck", function()
 end, { desc = "gha-pin.nvim: check pinned uses SHA vs latest", nargs = 0 })
 
 vim.api.nvim_create_user_command("GhaPinFix", function(opts)
+  if opts.range == 0 then
+    mod().fix(0, nil, nil)
+    return
+  end
   mod().fix(0, opts.line1, opts.line2)
 end, { desc = "gha-pin.nvim: update pinned SHA to latest", range = true })
 
