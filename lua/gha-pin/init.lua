@@ -655,9 +655,12 @@ function M.setup(cfg)
   vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
     group = group,
     callback = function(args)
-      local id = state.timers[args.buf]
-      if id then
-        pcall(vim.fn.timer_stop, id)
+      local timer = state.timers[args.buf]
+      if timer then
+        pcall(function()
+          timer:stop()
+          timer:close()
+        end)
         state.timers[args.buf] = nil
       end
       state.by_buf[args.buf] = nil
@@ -673,11 +676,16 @@ function M.setup(cfg)
           return
         end
         local ms = state.cfg.auto_check.debounce_ms or 700
-        if state.timers[args.buf] then
-          pcall(vim.fn.timer_stop, state.timers[args.buf])
-          state.timers[args.buf] = nil
+        local timer = state.timers[args.buf]
+        if timer then
+          pcall(function()
+            timer:stop()
+          end)
+        else
+          timer = vim.loop.new_timer()
+          state.timers[args.buf] = timer
         end
-        state.timers[args.buf] = vim.fn.timer_start(ms, function()
+        timer:start(ms, 0, function()
           vim.schedule(function()
             if vim.api.nvim_buf_is_valid(args.buf) then
               M.check(args.buf)
