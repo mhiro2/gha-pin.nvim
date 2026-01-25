@@ -13,10 +13,14 @@ local M = {}
 ---@field version integer
 ---@field entries table<string, GhaPinCacheEntry>
 
+---@return string
+local function cache_dir()
+  return vim.fn.stdpath("cache") .. "/gha-pin.nvim"
+end
+
+---@return string
 local function cache_file()
-  local dir = vim.fn.stdpath("cache") .. "/gha-pin.nvim"
-  vim.fn.mkdir(dir, "p")
-  return dir .. "/cache.json"
+  return cache_dir() .. "/cache.json"
 end
 
 ---@param s string
@@ -71,9 +75,10 @@ function M.save(cache, cb)
     return
   end
 
-  local fs = vim.uv or vim.loop
+  local fs = vim.uv
   if not fs then
     -- Fallback to sync write if libuv is not available
+    vim.fn.mkdir(cache_dir(), "p")
     local ok2, err = pcall(vim.fn.writefile, { encoded }, path)
     if not ok2 then
       vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(err)), vim.log.levels.WARN)
@@ -84,7 +89,7 @@ function M.save(cache, cb)
     return
   end
 
-  local dir = vim.fn.stdpath("cache") .. "/gha-pin.nvim"
+  local dir = cache_dir()
 
   -- Ensure directory exists (async mkdir)
   fs.fs_mkdir(dir, 448, function(mkdir_err)

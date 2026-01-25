@@ -682,7 +682,7 @@ function M.setup(cfg)
             timer:stop()
           end)
         else
-          timer = vim.loop.new_timer()
+          timer = vim.uv.new_timer()
           state.timers[args.buf] = timer
         end
         timer:start(ms, 0, function()

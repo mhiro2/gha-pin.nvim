@@ -49,7 +49,7 @@ function M.run(cmd, cb, opts)
     end)
   end
 
-  timer = vim.loop.new_timer()
+  timer = vim.uv.new_timer()
   timer:start(timeout, 0, function()
     timed_out = true
     if type(jobid) == "number" and jobid > 0 then
