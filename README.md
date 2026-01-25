@@ -8,31 +8,31 @@ Inspect and update **pinned SHAs** in GitHub Actions workflows (`uses: owner/rep
 This plugin is lightweight and practical for day-to-day use.
 It parses workflow/action files line-by-line (not a full YAML parser) and is not intended to replace Dependabot/Renovate.
 
-## Motivation
+## 💡 Motivation
 
 Pinning GitHub Actions to full commit SHAs is the safest, most reliable approach. Tags can change over time, which can undermine reproducibility and open the door to supply-chain risks. This plugin helps you keep SHA pins up to date.
 See: [Security hardening for GitHub Actions - GitHub Docs](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions)
 
-## Features
+## ✨ Features
 
-- **Diagnostics**: warns when a pinned SHA is not the latest (default policy: latest release)
-- **Virtual text**: shows `# Latest: <tag> <short-commit-sha>` at end of line (default ON)
-- **Fix**: updates outdated pins to the latest SHA (whole buffer or range)
-- **Explain**: shows what the plugin resolved for the `uses:` under cursor
-- **Cache**: TTL-based cache (default: 6 hours)
-- **Auth / transport**: uses [GitHub CLI (`gh`)](https://cli.github.com/) via `gh api` when available; falls back to `curl` + `GITHUB_TOKEN`
-- **Auto check targets**: workflows and composite action metadata files (`.github/actions/**/action.yml|yaml`)
+- 🔍 **Diagnostics**: warns when a pinned SHA is not the latest (default policy: latest release)
+- 💬 **Virtual text**: shows `# Latest: <tag> <short-commit-sha>` at end of line (default ON)
+- 🔧 **Fix**: updates outdated pins to the latest SHA (whole buffer or range)
+- 📖 **Explain**: shows what the plugin resolved for the `uses:` under cursor
+- 💾 **Cache**: TTL-based cache (default: 6 hours)
+- 🔐 **Auth / transport**: uses [GitHub CLI (`gh`)](https://cli.github.com/) via `gh api` when available; falls back to `curl` + `GITHUB_TOKEN`
+- 🧭 **Auto check targets**: workflows and composite action metadata files (`.github/actions/**/action.yml|yaml`)
 
 ![movie](https://github.com/user-attachments/assets/74f12504-96e6-41c3-8ff6-339af2f5aab7)
 
 
-## Requirements
+## 📋 Requirements
 
 - Neovim >= 0.9
 - [GitHub CLI (`gh`)](https://cli.github.com/) (recommended)
 - `curl`
 
-## Installation (lazy.nvim)
+## 📦 Installation (lazy.nvim)
 
 ```lua
 {
@@ -45,7 +45,7 @@ See: [Security hardening for GitHub Actions - GitHub Docs](https://docs.github.c
 }
 ```
 
-## Health Check
+## 🏥 Health Check
 
 Check plugin status and dependencies:
 
@@ -59,9 +59,9 @@ This will verify:
 - Authentication status (`gh` auth or `GITHUB_TOKEN`)
   - Set the `GITHUB_TOKEN` environment variable to a GitHub access token (typically a PAT; see [managing personal access tokens](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)).
 
-## Usage
+## 🚀 Usage
 
-### Commands
+### 📝 Commands
 
 | Command | Description |
 | --- | --- |
@@ -70,7 +70,7 @@ This will verify:
 | `:GhaPinExplain` | Show resolution details for `uses:` under cursor |
 | `:GhaPinCacheClear` | Clear cache |
 
-### What is "Latest"?
+### 🧪 What is "Latest"?
 
 By default, this plugin resolves "latest" as the **latest release** when available:
 
@@ -82,7 +82,7 @@ By default, this plugin resolves "latest" as the **latest release** when availab
 > [!NOTE]
 > Depending on the repo's release/tag conventions, the resolved SHA may not match your expectation.
 
-### Release Cooldown (Optional)
+### ⏱️ Release Cooldown (Optional)
 
 To avoid pinning to brand-new releases that may be unstable, you can enable a cooldown period:
 
@@ -99,12 +99,12 @@ require("gha-pin").setup({
   - Uses the tag's `tagger.date` for annotated tags; for lightweight tags it uses the commit date (`commit.committer.date`, fallback to `commit.author.date`).
   - Repos without releases (tags fallback) are always eligible.
 
-### Failure behavior
+### ⚠️ Failure behavior
 
 - If resolution fails (network/auth/rate limit/etc.), the plugin will **not** add "outdated" diagnostics for that `uses:`.
 - Virtual text may show `# Latest: (resolve failed)`. Use `:GhaPinExplain` to see the error.
 
-### Supported patterns
+### 🧩 Supported patterns
 
 - Included:
   - `uses: owner/repo@<full-commit-sha>`
@@ -115,7 +115,7 @@ require("gha-pin").setup({
   - any `uses:` containing `${{ }}` (dynamic expressions)
   - tag refs like `@v4` (not supported yet)
 
-## Configuration
+## ⚙️ Configuration
 
 ```lua
 require("gha-pin").setup({
@@ -134,12 +134,12 @@ require("gha-pin").setup({
 })
 ```
 
-### auto_check notes
+### 🗒️ auto_check notes
 
 - `auto_check` runs only for workflow files under `.github/workflows/*.yml|yaml` and action metadata files under `.github/actions/**/action.yml|yaml`.
 - If you feel this is too noisy/heavy, keep it disabled and run `:GhaPinCheck` manually, or increase `ttl_seconds`.
 
-## Cache
+## 💾 Cache
 
 The cache is stored at:
 
@@ -147,6 +147,6 @@ The cache is stored at:
 
 No tokens are written to disk.
 
-## License
+## 📄 License
 
 MIT License. See [LICENSE](./LICENSE).
