@@ -38,8 +38,16 @@ Help tags:
   Parse the current buffer and update diagnostics + virtual text.
 
                                                         *:GhaPinFix*
-:GhaPinFix
-  Update outdated pins to the latest SHA (whole buffer).
+:GhaPinFix[range]
+  Update outdated pins to the latest SHA.
+
+  Without [range]: Updates all outdated pins in the current buffer.
+  With [range]: Updates only pins within the specified line range.
+
+  Examples:
+    :GhaPinFix          " Update all pins in buffer
+    :10,20GhaPinFix     " Update pins in lines 10-20
+    " Visual select lines, then :GhaPinFix
 
                                                         *:GhaPinExplain*
 :GhaPinExplain
