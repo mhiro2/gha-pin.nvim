@@ -33,11 +33,6 @@ function M.uri_encode_path_segment(s)
   end))
 end
 
----@param fn fun()
-function M.schedule(fn)
-  vim.schedule(fn)
-end
-
 ---@param ms integer
 ---@param fn fun()
 ---@return integer timer_id

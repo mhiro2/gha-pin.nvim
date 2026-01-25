@@ -678,7 +678,7 @@ function M.setup(cfg)
           state.timers[args.buf] = nil
         end
         state.timers[args.buf] = vim.fn.timer_start(ms, function()
-          util.schedule(function()
+          vim.schedule(function()
             if vim.api.nvim_buf_is_valid(args.buf) then
               M.check(args.buf)
             end

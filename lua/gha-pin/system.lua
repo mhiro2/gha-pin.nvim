@@ -1,5 +1,3 @@
-local util = require("gha-pin.util")
-
 local M = {}
 
 ---@class GhaPinSystemResult
@@ -19,7 +17,7 @@ function M.run(cmd, cb, opts)
 
   if vim.system then
     vim.system(cmd, { text = true, timeout = timeout }, function(obj)
-      util.schedule(function()
+      vim.schedule(function()
         cb({
           code = obj.code or 0,
           stdout = obj.stdout or "",
@@ -46,7 +44,7 @@ function M.run(cmd, cb, opts)
 
   local function schedule_result(code, out, err)
     cleanup()
-    util.schedule(function()
+    vim.schedule(function()
       cb({ code = code, stdout = out, stderr = err })
     end)
   end
@@ -91,7 +89,7 @@ function M.run(cmd, cb, opts)
 
   if type(jobid) ~= "number" or jobid <= 0 then
     cleanup()
-    util.schedule(function()
+    vim.schedule(function()
       cb({ code = 1, stdout = "", stderr = "Failed to start job" })
     end)
   end
