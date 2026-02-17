@@ -75,6 +75,21 @@ T["parse_lines: does not match abuses/reuses"] = function()
   expect.equality(refs[1].sha, SHA1)
 end
 
+T["parse_lines: ignores commented out uses lines"] = function()
+  local lines = {
+    ("# uses: actions/checkout@%s"):format(SHA1),
+    ("    # uses: actions/setup-node@%s"):format(SHA1),
+    ("name: demo # uses: actions/upload-artifact@%s"):format(SHA1),
+    ("    - uses: actions/checkout@%s"):format(SHA1),
+  }
+
+  local refs = parser.parse_lines(lines)
+  expect.equality(#refs, 1)
+  expect.equality(refs[1].owner, "actions")
+  expect.equality(refs[1].repo, "checkout")
+  expect.equality(refs[1].sha, SHA1)
+end
+
 T["parse_lines: ignores non-sha patterns"] = function()
   local lines = {
     "    - uses: ./local",

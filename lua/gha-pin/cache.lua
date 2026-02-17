@@ -2,6 +2,15 @@ local util = require("gha-pin.util")
 
 local M = {}
 
+local save_queue = {
+  running = false,
+  pending = false,
+  ---@type GhaPinCache|nil
+  cache = nil,
+  ---@type fun(ok: boolean, err?: string)[]
+  callbacks = {},
+}
+
 ---@class GhaPinCacheEntry
 ---@field checked_at integer
 ---@field latest_tag string|nil
@@ -64,7 +73,7 @@ end
 
 ---@param cache GhaPinCache
 ---@param cb? fun(ok: boolean, err?: string)
-function M.save(cache, cb)
+local function save_once(cache, cb)
   local path = cache_file()
   local ok, encoded = pcall(json_encode, cache)
   if not ok then
@@ -158,6 +167,46 @@ function M.save(cache, cb)
       end)
     end)
   end)
+end
+
+---@param callbacks fun(ok: boolean, err?: string)[]
+---@param ok boolean
+---@param err? string
+local function run_callbacks(callbacks, ok, err)
+  for _, f in ipairs(callbacks) do
+    pcall(f, ok, err)
+  end
+end
+
+local function flush_save_queue()
+  if save_queue.running or not save_queue.pending or not save_queue.cache then
+    return
+  end
+
+  save_queue.running = true
+  save_queue.pending = false
+  local cache = save_queue.cache
+  local callbacks = save_queue.callbacks
+  save_queue.callbacks = {}
+
+  save_once(cache, function(ok, err)
+    save_queue.running = false
+    run_callbacks(callbacks, ok, err)
+    if save_queue.pending then
+      flush_save_queue()
+    end
+  end)
+end
+
+---@param cache GhaPinCache
+---@param cb? fun(ok: boolean, err?: string)
+function M.save(cache, cb)
+  save_queue.cache = cache
+  save_queue.pending = true
+  if cb then
+    table.insert(save_queue.callbacks, cb)
+  end
+  flush_save_queue()
 end
 
 ---@param host string

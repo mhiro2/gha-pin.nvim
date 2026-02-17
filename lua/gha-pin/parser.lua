@@ -20,10 +20,20 @@ local SHA40 = "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%
 ---@return integer|nil col_end
 ---@return string|nil uses_token
 local function extract_uses_token(line)
+  local trimmed = line:gsub("^%s+", "")
+  if trimmed:sub(1, 1) == "#" then
+    return nil, nil, nil
+  end
+
   -- best-effort: find `uses:` and take the next token until whitespace/comment
   -- supports quoted values (single/double) in a simple way
   local match_start, match_end = line:find("%f[%w]uses:%s*")
   if not match_start or not match_end then
+    return nil, nil, nil
+  end
+
+  local comment_start = line:find("#", 1, true)
+  if comment_start and comment_start < match_start then
     return nil, nil, nil
   end
 
