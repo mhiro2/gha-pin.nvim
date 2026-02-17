@@ -3,6 +3,19 @@ local util = require("gha-pin.util")
 
 local M = {}
 
+local request_defaults = {
+  max_concurrent = 4,
+  max_retries = 2,
+  retry_base_delay_ms = 120,
+}
+
+local request_limits = vim.deepcopy(request_defaults)
+
+local request_state = {
+  running = 0,
+  pending = {},
+}
+
 ---@class GhaPinGithubConfig
 ---@field api_base_url string
 ---@field prefer_gh boolean
@@ -68,19 +81,85 @@ local function is_not_found(err)
   return err:find("404", 1, true) ~= nil or err:find("Not Found", 1, true) ~= nil
 end
 
+---@param err string
+---@return integer|nil
+local function parse_http_status(err)
+  if type(err) ~= "string" or err == "" then
+    return nil
+  end
+
+  local status = err:match("HTTP%s*([1-5]%d%d)")
+  if status then
+    return tonumber(status)
+  end
+
+  status = err:match("error:%s*([1-5]%d%d)")
+  if status then
+    return tonumber(status)
+  end
+
+  return nil
+end
+
+---@param err string
+---@return boolean
+local function is_retryable_http_error(err)
+  local status = parse_http_status(err)
+  if not status then
+    return false
+  end
+  return status == 429 or (status >= 500 and status <= 599)
+end
+
+---@param attempt integer
+---@return integer
+local function retry_delay_ms(attempt)
+  local base = request_limits.retry_base_delay_ms * (2 ^ math.max(0, attempt - 1))
+  local jitter = (attempt * 17) % 31
+  return math.floor(base + jitter)
+end
+
+---@param worker fun(done: fun())
+local function enqueue_request(worker)
+  table.insert(request_state.pending, worker)
+
+  local function pump()
+    while request_state.running < request_limits.max_concurrent and #request_state.pending > 0 do
+      local next_worker = table.remove(request_state.pending, 1)
+      request_state.running = request_state.running + 1
+      next_worker(function()
+        request_state.running = math.max(0, request_state.running - 1)
+        pump()
+      end)
+    end
+  end
+
+  pump()
+end
+
+---@param cmd string[]
+---@param cb fun(res: GhaPinSystemResult)
+local function run_limited(cmd, cb)
+  enqueue_request(function(done)
+    system.run(cmd, function(res)
+      done()
+      cb(res)
+    end)
+  end)
+end
+
 ---@param cfg GhaPinGithubConfig
----@param endpoint string e.g. "repos/owner/repo/releas..."
----@param cb fun(data: any|nil, err: string|nil)
-local function request_json(cfg, endpoint, cb)
+---@param endpoint string
+---@param cb fun(body: string|nil, err: string|nil)
+local function request_raw(cfg, endpoint, cb)
   local prefer_gh = cfg.prefer_gh and is_github_com(cfg.api_base_url) and vim.fn.executable("gh") == 1
   if prefer_gh then
-    system.run({ "gh", "api", endpoint }, function(res)
+    run_limited({ "gh", "api", endpoint }, function(res)
       if res.code ~= 0 then
         cb(nil, best_error_from_res(res))
         return
       end
-      local data, err = decode_json(res.stdout)
-      cb(data, err)
+      cb(res.stdout, nil)
     end)
     return
   end
@@ -99,14 +178,38 @@ local function request_json(cfg, endpoint, cb)
   end
   table.insert(cmd, url)
 
-  system.run(cmd, function(res)
+  run_limited(cmd, function(res)
     if res.code ~= 0 then
       cb(nil, best_error_from_res(res))
       return
     end
-    local data, err = decode_json(res.stdout)
-    cb(data, err)
+    cb(res.stdout, nil)
   end)
+end
+
+---@param cfg GhaPinGithubConfig
+---@param endpoint string e.g. "repos/owner/repo/releas..."
+---@param cb fun(data: any|nil, err: string|nil)
+local function request_json(cfg, endpoint, cb)
+  local function attempt_request(attempt)
+    request_raw(cfg, endpoint, function(body, err)
+      if err then
+        if attempt <= request_limits.max_retries and is_retryable_http_error(err) then
+          vim.defer_fn(function()
+            attempt_request(attempt + 1)
+          end, retry_delay_ms(attempt))
+          return
+        end
+        cb(nil, err)
+        return
+      end
+
+      local data, decode_err = decode_json(body or "")
+      cb(data, decode_err)
+    end)
+  end
+
+  attempt_request(1)
 end
 
 ---@param cfg GhaPinGithubConfig
@@ -374,6 +477,30 @@ function M.resolve_latest(cfg, minimum_age_seconds, owner, repo, cb)
       cb({ latest_tag = tag, latest_sha = sha, source = "release", published_at = nil }, nil)
     end)
   end)
+end
+
+-- internal: expose for tests
+---@param opts? { max_concurrent?: integer, max_retries?: integer, retry_base_delay_ms?: integer }
+function M._test_set_request_limits(opts)
+  if type(opts) ~= "table" then
+    return
+  end
+  if type(opts.max_concurrent) == "number" and opts.max_concurrent > 0 then
+    request_limits.max_concurrent = math.floor(opts.max_concurrent)
+  end
+  if type(opts.max_retries) == "number" and opts.max_retries >= 0 then
+    request_limits.max_retries = math.floor(opts.max_retries)
+  end
+  if type(opts.retry_base_delay_ms) == "number" and opts.retry_base_delay_ms >= 0 then
+    request_limits.retry_base_delay_ms = math.floor(opts.retry_base_delay_ms)
+  end
+end
+
+-- internal: expose for tests
+function M._test_reset_request_state()
+  request_limits = vim.deepcopy(request_defaults)
+  request_state.running = 0
+  request_state.pending = {}
 end
 
 return M

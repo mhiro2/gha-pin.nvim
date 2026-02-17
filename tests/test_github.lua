@@ -14,6 +14,7 @@ end
 local function with_stubs(opts, fn)
   local orig_run = system.run
   local orig_executable = vim.fn.executable
+  github._test_reset_request_state()
 
   vim.fn.executable = function(name)
     if opts.executable and opts.executable[name] ~= nil then
@@ -31,7 +32,19 @@ local function with_stubs(opts, fn)
 
   system.run = orig_run
   vim.fn.executable = orig_executable
+  github._test_reset_request_state()
 
+  if not ok then
+    error(err)
+  end
+end
+
+---@param opts { max_concurrent?: integer, max_retries?: integer, retry_base_delay_ms?: integer }
+---@param fn fun()
+local function with_request_limits(opts, fn)
+  github._test_set_request_limits(opts)
+  local ok, err = pcall(fn)
+  github._test_reset_request_state()
   if not ok then
     error(err)
   end
@@ -177,6 +190,112 @@ T["resolve_latest: json decode failure returns error"] = function()
     expect.equality(got_res, nil)
     expect.equality(type(got_err), "string")
   end)
+end
+
+T["resolve_latest: retries transient 5xx and succeeds"] = function()
+  local sha = hex40("9")
+  local cfg = { api_base_url = "https://api.github.com", prefer_gh = false, token_env = "GITHUB_TOKEN" }
+  local release_attempts = 0
+
+  with_stubs({
+    executable = { curl = 1, gh = 0 },
+    route = function(cmd)
+      if cmd_has(cmd, "repos/o/r/releases/latest") then
+        release_attempts = release_attempts + 1
+        if release_attempts == 1 then
+          return { code = 22, stdout = "", stderr = "HTTP 502 Bad Gateway" }
+        end
+        return { code = 0, stdout = '{"tag_name":"v3.0.0"}', stderr = "" }
+      end
+      if cmd_has(cmd, "repos/o/r/git/ref/tags/v3.0.0") then
+        return { code = 0, stdout = ('{"object":{"type":"commit","sha":"%s"}}'):format(sha), stderr = "" }
+      end
+      return { code = 1, stdout = "", stderr = "unexpected endpoint" }
+    end,
+  }, function()
+    with_request_limits({ max_retries = 2, retry_base_delay_ms = 0 }, function()
+      local got_res, got_err
+      github.resolve_latest(cfg, 0, "o", "r", function(res, err)
+        got_res, got_err = res, err
+      end)
+      vim.wait(300, function()
+        return got_res ~= nil or got_err ~= nil
+      end)
+
+      expect.equality(got_err, nil)
+      expect.equality(got_res.latest_tag, "v3.0.0")
+      expect.equality(got_res.latest_sha, sha)
+      expect.equality(release_attempts, 2)
+    end)
+  end)
+end
+
+T["resolve_latest: caps concurrent outbound requests"] = function()
+  local cfg = { api_base_url = "https://api.github.com", prefer_gh = false, token_env = "GITHUB_TOKEN" }
+  local sha = hex40("a")
+  local total = 6
+  local completed = 0
+  local failed = 0
+  local running = 0
+  local max_running = 0
+
+  local orig_run = system.run
+  local orig_executable = vim.fn.executable
+  github._test_reset_request_state()
+  github._test_set_request_limits({ max_concurrent = 2, max_retries = 0, retry_base_delay_ms = 0 })
+
+  vim.fn.executable = function(name)
+    if name == "curl" then
+      return 1
+    end
+    if name == "gh" then
+      return 0
+    end
+    return orig_executable(name)
+  end
+
+  system.run = function(cmd, cb)
+    running = running + 1
+    max_running = math.max(max_running, running)
+    vim.defer_fn(function()
+      running = running - 1
+      if cmd_has(cmd, "releases/latest") then
+        cb({ code = 0, stdout = '{"tag_name":"v1.0.0"}', stderr = "" })
+        return
+      end
+      if cmd_has(cmd, "git/ref/tags/v1.0.0") then
+        cb({ code = 0, stdout = ('{"object":{"type":"commit","sha":"%s"}}'):format(sha), stderr = "" })
+        return
+      end
+      cb({ code = 1, stdout = "", stderr = "unexpected endpoint" })
+    end, 20)
+  end
+
+  local ok, err = pcall(function()
+    for i = 1, total do
+      github.resolve_latest(cfg, 0, "o", ("repo-%d"):format(i), function(res, resolve_err)
+        if resolve_err or not res then
+          failed = failed + 1
+        end
+        completed = completed + 1
+      end)
+    end
+
+    local done = vim.wait(5000, function()
+      return completed == total
+    end, 10)
+    expect.equality(done, true)
+    expect.equality(failed, 0)
+    expect.equality(max_running <= 2, true)
+  end)
+
+  system.run = orig_run
+  vim.fn.executable = orig_executable
+  github._test_reset_request_state()
+
+  if not ok then
+    error(err)
+  end
 end
 
 T["resolve_latest: cooldown disabled (0) allows all releases"] = function()

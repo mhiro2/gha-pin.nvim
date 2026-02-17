@@ -76,4 +76,49 @@ T["check: virtual text shows cooldown for latest release"] = function()
   util.timestamp_age_seconds = orig_timestamp_age_seconds
 end
 
+T["setup: rerun closes existing auto-check timers"] = function()
+  local orig_new_timer = vim.uv.new_timer
+
+  ---@type { stopped: integer, closed: integer, started: integer }[]
+  local created = {}
+  vim.uv.new_timer = function()
+    local timer = { stopped = 0, closed = 0, started = 0 }
+    function timer:start(_ms, _repeat_ms, _cb)
+      self.started = self.started + 1
+    end
+    function timer:stop()
+      self.stopped = self.stopped + 1
+    end
+    function timer:close()
+      self.closed = self.closed + 1
+    end
+    table.insert(created, timer)
+    return timer
+  end
+
+  local ok, err = pcall(function()
+    gha_pin.setup({
+      auto_check = { enabled = true, debounce_ms = 10 },
+    })
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(bufnr, "/tmp/repo/.github/workflows/ci.yml")
+    vim.api.nvim_exec_autocmds("BufEnter", { buffer = bufnr })
+    expect.equality(#created, 1)
+    expect.equality(created[1].started, 1)
+
+    gha_pin.setup({
+      auto_check = { enabled = true, debounce_ms = 10 },
+    })
+
+    expect.equality(created[1].stopped >= 1, true)
+    expect.equality(created[1].closed >= 1, true)
+  end)
+
+  vim.uv.new_timer = orig_new_timer
+  if not ok then
+    error(err)
+  end
+end
+
 return T

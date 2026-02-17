@@ -196,6 +196,26 @@ local function ensure_setup()
   M.setup()
 end
 
+---@param timer uv.uv_timer_t|nil
+local function stop_and_close_timer(timer)
+  if not timer then
+    return
+  end
+  pcall(function()
+    timer:stop()
+  end)
+  pcall(function()
+    timer:close()
+  end)
+end
+
+local function clear_all_timers()
+  for bufnr, timer in pairs(state.timers) do
+    stop_and_close_timer(timer)
+    state.timers[bufnr] = nil
+  end
+end
+
 ---@param path string|nil
 ---@return boolean
 local function is_workflow_file(path)
@@ -639,6 +659,11 @@ end
 ---@param cfg GhaPinConfig|nil
 ---@return nil
 function M.setup(cfg)
+  -- Re-running setup should fully reset autocmd-timer state to avoid leaked handles.
+  clear_all_timers()
+  state.by_buf = {}
+  state.inflight = {}
+
   local user_cfg = normalize_user_cfg(cfg)
   local ok, merged = pcall(deep_merge, vim.deepcopy(defaults), user_cfg)
   if not ok or type(merged) ~= "table" then
@@ -656,13 +681,8 @@ function M.setup(cfg)
     group = group,
     callback = function(args)
       local timer = state.timers[args.buf]
-      if timer then
-        pcall(function()
-          timer:stop()
-          timer:close()
-        end)
-        state.timers[args.buf] = nil
-      end
+      stop_and_close_timer(timer)
+      state.timers[args.buf] = nil
       state.by_buf[args.buf] = nil
     end,
   })
