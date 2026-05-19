@@ -109,74 +109,59 @@ local function save_once(cache, cb)
     return
   end
 
-  local dir = cache_dir()
-
-  -- Ensure directory exists (async mkdir)
-  fs.fs_mkdir(dir, 448, function(mkdir_err)
-    if mkdir_err and mkdir_err:match("EEXIST") == nil then
-      schedule_notify(
-        ("gha-pin.nvim: Failed to create cache directory: %s"):format(tostring(mkdir_err)),
-        vim.log.levels.WARN
-      )
+  -- Write to temporary file first (atomic write pattern). The cache
+  -- directory is created in `M.save` on the main loop, so we do not
+  -- touch the filesystem synchronously from here (this function can be
+  -- re-entered from a libuv callback during queue drain, which is a
+  -- fast event context where `vim.fn.*` calls are disallowed).
+  local tmp_path = path .. ".tmp"
+  fs.fs_open(tmp_path, "w", 438, function(open_err, fd)
+    if open_err or not fd then
+      schedule_notify(("gha-pin.nvim: Failed to open cache file: %s"):format(tostring(open_err)), vim.log.levels.WARN)
       if cb then
-        cb(false, tostring(mkdir_err))
+        cb(false, tostring(open_err))
       end
       return
     end
 
-    -- Write to temporary file first (atomic write pattern)
-    local tmp_path = path .. ".tmp"
-    fs.fs_open(tmp_path, "w", 438, function(open_err, fd)
-      if open_err or not fd then
-        schedule_notify(("gha-pin.nvim: Failed to open cache file: %s"):format(tostring(open_err)), vim.log.levels.WARN)
-        if cb then
-          cb(false, tostring(open_err))
-        end
+    fs.fs_write(fd, encoded, -1, function(write_err)
+      if write_err then
+        fs.fs_close(fd, function()
+          schedule_notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(write_err)), vim.log.levels.WARN)
+          if cb then
+            cb(false, tostring(write_err))
+          end
+        end)
         return
       end
 
-      fs.fs_write(fd, encoded, -1, function(write_err)
-        if write_err then
-          fs.fs_close(fd, function()
-            schedule_notify(
-              ("gha-pin.nvim: Failed to write cache: %s"):format(tostring(write_err)),
-              vim.log.levels.WARN
-            )
-            if cb then
-              cb(false, tostring(write_err))
-            end
-          end)
+      fs.fs_close(fd, function(close_err)
+        if close_err then
+          schedule_notify(
+            ("gha-pin.nvim: Failed to close cache file: %s"):format(tostring(close_err)),
+            vim.log.levels.WARN
+          )
+          if cb then
+            cb(false, tostring(close_err))
+          end
           return
         end
 
-        fs.fs_close(fd, function(close_err)
-          if close_err then
+        -- Atomic rename from temp to actual path
+        fs.fs_rename(tmp_path, path, function(rename_err)
+          if rename_err then
             schedule_notify(
-              ("gha-pin.nvim: Failed to close cache file: %s"):format(tostring(close_err)),
+              ("gha-pin.nvim: Failed to rename cache file: %s"):format(tostring(rename_err)),
               vim.log.levels.WARN
             )
             if cb then
-              cb(false, tostring(close_err))
+              cb(false, tostring(rename_err))
             end
             return
           end
-
-          -- Atomic rename from temp to actual path
-          fs.fs_rename(tmp_path, path, function(rename_err)
-            if rename_err then
-              schedule_notify(
-                ("gha-pin.nvim: Failed to rename cache file: %s"):format(tostring(rename_err)),
-                vim.log.levels.WARN
-              )
-              if cb then
-                cb(false, tostring(rename_err))
-              end
-              return
-            end
-            if cb then
-              cb(true)
-            end
-          end)
+          if cb then
+            cb(true)
+          end
         end)
       end)
     end)
@@ -215,6 +200,19 @@ end
 ---@param cache GhaPinCache
 ---@param cb? fun(ok: boolean, err?: string)
 function M.save(cache, cb)
+  -- Create the cache directory here on the main loop. `vim.uv.fs_mkdir`
+  -- is not recursive, and `vim.fn.mkdir` cannot be called from the
+  -- libuv callbacks that re-drive the queue, so doing it once up front
+  -- guarantees `save_once` only has to perform async writes.
+  local mkdir_ok, mkdir_err = pcall(vim.fn.mkdir, cache_dir(), "p")
+  if not mkdir_ok then
+    vim.notify(("gha-pin.nvim: Failed to create cache directory: %s"):format(tostring(mkdir_err)), vim.log.levels.WARN)
+    if cb then
+      cb(false, tostring(mkdir_err))
+    end
+    return
+  end
+
   save_queue.cache = cache
   save_queue.pending = true
   if cb then
