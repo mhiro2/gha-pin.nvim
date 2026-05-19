@@ -32,6 +32,17 @@ local function cache_file()
   return cache_dir() .. "/cache.json"
 end
 
+---@param msg string
+---@param level integer
+local function schedule_notify(msg, level)
+  -- `vim.notify` ultimately calls `nvim_echo`, which is disallowed in a fast
+  -- event context (e.g. libuv callbacks). Defer to the main loop so writes
+  -- triggered from `vim.uv.fs_*` callbacks do not crash on nightly Neovim.
+  vim.schedule(function()
+    vim.notify(msg, level)
+  end)
+end
+
 ---@param s string
 ---@return any
 local function json_decode(s)
@@ -103,7 +114,7 @@ local function save_once(cache, cb)
   -- Ensure directory exists (async mkdir)
   fs.fs_mkdir(dir, 448, function(mkdir_err)
     if mkdir_err and mkdir_err:match("EEXIST") == nil then
-      vim.notify(
+      schedule_notify(
         ("gha-pin.nvim: Failed to create cache directory: %s"):format(tostring(mkdir_err)),
         vim.log.levels.WARN
       )
@@ -117,7 +128,7 @@ local function save_once(cache, cb)
     local tmp_path = path .. ".tmp"
     fs.fs_open(tmp_path, "w", 438, function(open_err, fd)
       if open_err or not fd then
-        vim.notify(("gha-pin.nvim: Failed to open cache file: %s"):format(tostring(open_err)), vim.log.levels.WARN)
+        schedule_notify(("gha-pin.nvim: Failed to open cache file: %s"):format(tostring(open_err)), vim.log.levels.WARN)
         if cb then
           cb(false, tostring(open_err))
         end
@@ -127,7 +138,10 @@ local function save_once(cache, cb)
       fs.fs_write(fd, encoded, -1, function(write_err)
         if write_err then
           fs.fs_close(fd, function()
-            vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(write_err)), vim.log.levels.WARN)
+            schedule_notify(
+              ("gha-pin.nvim: Failed to write cache: %s"):format(tostring(write_err)),
+              vim.log.levels.WARN
+            )
             if cb then
               cb(false, tostring(write_err))
             end
@@ -137,7 +151,7 @@ local function save_once(cache, cb)
 
         fs.fs_close(fd, function(close_err)
           if close_err then
-            vim.notify(
+            schedule_notify(
               ("gha-pin.nvim: Failed to close cache file: %s"):format(tostring(close_err)),
               vim.log.levels.WARN
             )
@@ -150,7 +164,7 @@ local function save_once(cache, cb)
           -- Atomic rename from temp to actual path
           fs.fs_rename(tmp_path, path, function(rename_err)
             if rename_err then
-              vim.notify(
+              schedule_notify(
                 ("gha-pin.nvim: Failed to rename cache file: %s"):format(tostring(rename_err)),
                 vim.log.levels.WARN
               )
