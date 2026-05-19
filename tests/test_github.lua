@@ -497,8 +497,8 @@ T["resolve_latest: annotated tag within cooldown returns empty SHA"] = function(
 end
 
 T["resolve_latest: annotated tag past cooldown returns actual SHA"] = function()
-  local tag_sha = hex40("g")
-  local commit_sha = hex40("h")
+  local tag_sha = hex40("0")
+  local commit_sha = hex40("1")
   local cfg = { api_base_url = "https://api.github.com", prefer_gh = false, token_env = "GITHUB_TOKEN" }
 
   -- Mock timestamp_age_seconds to return a value past cooldown period
