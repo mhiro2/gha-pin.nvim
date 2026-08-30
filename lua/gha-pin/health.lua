@@ -1,4 +1,5 @@
 local health = vim.health
+local nvim_version = require("gha-pin.version")
 
 local M = {}
 
@@ -12,75 +13,26 @@ local M = {}
 ---@param timeout_ms integer
 ---@return GhaPinHealthCmdResult
 local function run_cmd(cmd, timeout_ms)
-  if vim.system then
-    local obj = vim.system(cmd, { text = true }):wait(timeout_ms)
-    if not obj then
-      return { code = -1, stdout = "", stderr = "Timed out", timeout = true }
-    end
-    return {
-      code = obj.code or 0,
-      stdout = obj.stdout or "",
-      stderr = obj.stderr or "",
-    }
-  end
-
-  local stdout = {}
-  local stderr = {}
-  local jobid = vim.fn.jobstart(cmd, {
-    stdout_buffered = true,
-    stderr_buffered = true,
-    on_stdout = function(_, data)
-      if type(data) == "table" then
-        for _, v in ipairs(data) do
-          if v ~= "" then
-            table.insert(stdout, v)
-          end
-        end
-      end
-    end,
-    on_stderr = function(_, data)
-      if type(data) == "table" then
-        for _, v in ipairs(data) do
-          if v ~= "" then
-            table.insert(stderr, v)
-          end
-        end
-      end
-    end,
-  })
-
-  if type(jobid) ~= "number" or jobid <= 0 then
-    return { code = 1, stdout = "", stderr = "Failed to start job" }
-  end
-
-  local waited = vim.fn.jobwait({ jobid }, timeout_ms)
-  local code = type(waited) == "table" and waited[1] or -1
-  if code == -1 then
-    pcall(vim.fn.jobstop, jobid)
-    return { code = -1, stdout = table.concat(stdout, "\n"), stderr = table.concat(stderr, "\n"), timeout = true }
-  end
-  return { code = code, stdout = table.concat(stdout, "\n"), stderr = table.concat(stderr, "\n") }
+  local obj = vim.system(cmd, { text = true, timeout = timeout_ms }):wait()
+  return {
+    code = obj.code or 0,
+    stdout = obj.stdout or "",
+    stderr = obj.stderr or "",
+    timeout = obj.code == 124,
+  }
 end
 
 local function check_neovim_version()
   health.start("Neovim version")
   local version = vim.version()
-  local major = version.major
-  local minor = version.minor
-  local required_major = 0
-  local required_minor = 9
-
-  if major > required_major or (major == required_major and minor >= required_minor) then
-    health.ok(string.format("Neovim %d.%d.%d is supported", major, minor, version.patch))
+  if nvim_version.is_supported(version) then
+    health.ok(string.format("Neovim %s is supported", nvim_version.format(version)))
   else
     health.error(
       string.format(
-        "Neovim %d.%d.%d is not supported. Required: >= %d.%d",
-        major,
-        minor,
-        version.patch,
-        required_major,
-        required_minor
+        "Neovim %s is not supported. Required: >= %s",
+        nvim_version.format(version),
+        nvim_version.format(nvim_version.minimum)
       )
     )
   end

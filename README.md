@@ -28,7 +28,7 @@ See: [Security hardening for GitHub Actions - GitHub Docs](https://docs.github.c
 
 ## 📋 Requirements
 
-- Neovim >= 0.9
+- Neovim >= 0.10.0
 - [GitHub CLI (`gh`)](https://cli.github.com/) (recommended)
 - `curl`
 
