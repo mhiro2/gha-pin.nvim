@@ -2,6 +2,8 @@ local util = require("gha-pin.util")
 
 local M = {}
 
+M.VERSION = 2
+
 local save_queue = {
   running = false,
   pending = false,
@@ -15,6 +17,8 @@ local save_queue = {
 ---@field checked_at integer
 ---@field latest_tag string|nil
 ---@field latest_sha string|nil
+---@field resolved_sha string|nil
+---@field source string|nil
 ---@field pinned_map table<string, string>|nil
 ---@field published_at string|nil
 
@@ -48,7 +52,7 @@ function M.load()
   local path = cache_file()
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok or not lines or #lines == 0 then
-    return { version = 1, entries = {} }
+    return { version = M.VERSION, entries = {} }
   end
 
   local ok2, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
@@ -56,11 +60,12 @@ function M.load()
     if not ok2 then
       vim.notify("gha-pin.nvim: Failed to decode cache file, using empty cache", vim.log.levels.WARN)
     end
-    return { version = 1, entries = {} }
+    return { version = M.VERSION, entries = {} }
   end
 
-  decoded.version = decoded.version or 1
-  decoded.entries = decoded.entries or {}
+  if decoded.version ~= M.VERSION or type(decoded.entries) ~= "table" then
+    return { version = M.VERSION, entries = {} }
+  end
   return decoded
 end
 
@@ -223,11 +228,16 @@ end
 ---@param latest_tag string|nil
 ---@param latest_sha string|nil
 ---@param published_at string|nil
-function M.put(cache, key, latest_tag, latest_sha, published_at)
+---@param source string|nil
+---@param resolved_sha string|nil
+function M.put(cache, key, latest_tag, latest_sha, published_at, source, resolved_sha)
+  cache.version = M.VERSION
   cache.entries[key] = {
     checked_at = os.time(),
     latest_tag = latest_tag,
     latest_sha = latest_sha,
+    resolved_sha = resolved_sha or latest_sha,
+    source = source,
     published_at = published_at,
   }
 end

@@ -140,6 +140,13 @@ local function is_valid_owner_or_repo(owner_or_repo)
     and owner_or_repo:match("%.%.") == nil -- Reject ".." (path traversal attempt)
 end
 
+---@param value any
+---@return boolean
+local function is_hex40(value)
+  return type(value) == "string"
+    and value:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil
+end
+
 ---@param url string
 ---@param fallback string
 ---@return string
@@ -255,23 +262,33 @@ local function resolve_repo(key, owner, repo, cb)
     return
   end
   local entry = cache.get_if_fresh(state.cache, key, state.cfg.ttl_seconds)
-  if entry and entry.latest_sha and entry.latest_sha ~= "" then
-    -- Check cooldown for cached releases
-    if state.cfg.minimum_release_age_seconds > 0 and entry.published_at then
-      local age = util.timestamp_age_seconds(entry.published_at)
-      if age < state.cfg.minimum_release_age_seconds then
-        -- Within cooldown period - treat as not eligible yet
-        cb({ latest_tag = entry.latest_tag, latest_sha = "", source = "cache", published_at = entry.published_at }, nil)
+  if entry and (entry.source == "release" or entry.source == "tags") then
+    local resolved_sha = entry.resolved_sha or entry.latest_sha
+    if is_hex40(resolved_sha) then
+      local latest_sha = resolved_sha
+      local can_use = true
+      if state.cfg.minimum_release_age_seconds > 0 and entry.source == "release" then
+        can_use = util.is_iso8601_timestamp(entry.published_at)
+        if can_use then
+          local ok, age = pcall(util.timestamp_age_seconds, entry.published_at)
+          can_use = ok and type(age) == "number"
+          if can_use and age < state.cfg.minimum_release_age_seconds then
+            latest_sha = ""
+          end
+        end
+      end
+
+      if can_use then
+        cb({
+          latest_tag = entry.latest_tag,
+          latest_sha = latest_sha,
+          resolved_sha = resolved_sha,
+          source = "cache",
+          published_at = entry.published_at,
+        }, nil)
         return
       end
     end
-    cb({
-      latest_tag = entry.latest_tag,
-      latest_sha = entry.latest_sha,
-      source = "cache",
-      published_at = entry.published_at,
-    }, nil)
-    return
   end
 
   if state.inflight[key] then
@@ -281,9 +298,10 @@ local function resolve_repo(key, owner, repo, cb)
 
   state.inflight[key] = { cbs = { cb } }
   github.resolve_latest(state.cfg.github, state.cfg.minimum_release_age_seconds, owner, repo, function(res, err)
-    -- Store result including published_at (even if latest_sha is empty due to cooldown)
+    -- Keep the resolved SHA even while latest_sha is empty during cooldown,
+    -- so a fresh cache entry can become eligible without changing releases.
     if res then
-      cache.put(state.cache, key, res.latest_tag, res.latest_sha, res.published_at)
+      cache.put(state.cache, key, res.latest_tag, res.latest_sha, res.published_at, res.source, res.resolved_sha)
       cache.save(state.cache)
     end
 

@@ -27,7 +27,7 @@ end
 
 T["save: serializes rapid writes and persists complete snapshot"] = function()
   with_clean_cache(function()
-    local c = { version = 1, entries = {} }
+    local c = { version = cache.VERSION, entries = {} }
     local pending = 0
     local failed = 0
     local total = 30
@@ -36,7 +36,7 @@ T["save: serializes rapid writes and persists complete snapshot"] = function()
       local key = ("https://api.github.com/o/repo-%d"):format(i)
       local nibble = string.format("%x", i % 16)
       local sha = string.rep(nibble, 40)
-      cache.put(c, key, ("v%d"):format(i), sha, nil)
+      cache.put(c, key, ("v%d"):format(i), sha, nil, "release", sha)
 
       pending = pending + 1
       cache.save(c, function(ok, _err)
@@ -62,11 +62,11 @@ end
 
 T["save: latest requested snapshot wins"] = function()
   with_clean_cache(function()
-    local c1 = { version = 1, entries = {} }
-    local c2 = { version = 1, entries = {} }
+    local c1 = { version = cache.VERSION, entries = {} }
+    local c2 = { version = cache.VERSION, entries = {} }
 
-    cache.put(c1, "https://api.github.com/o/repo-a", "v1", string.rep("a", 40), nil)
-    cache.put(c2, "https://api.github.com/o/repo-b", "v2", string.rep("b", 40), nil)
+    cache.put(c1, "https://api.github.com/o/repo-a", "v1", string.rep("a", 40), nil, "tags", string.rep("a", 40))
+    cache.put(c2, "https://api.github.com/o/repo-b", "v2", string.rep("b", 40), nil, "tags", string.rep("b", 40))
 
     local pending = 0
     pending = pending + 1
@@ -86,6 +86,36 @@ T["save: latest requested snapshot wins"] = function()
     local loaded = cache.load()
     expect.equality(loaded.entries["https://api.github.com/o/repo-a"], nil)
     expect.equality(loaded.entries["https://api.github.com/o/repo-b"].latest_tag, "v2")
+  end)
+end
+
+T["load: invalidates entries from an older policy schema"] = function()
+  with_clean_cache(function()
+    local old = {
+      version = 1,
+      entries = {
+        ["https://api.github.com/o/repo"] = {
+          checked_at = os.time(),
+          latest_tag = "v1",
+          latest_sha = string.rep("a", 40),
+        },
+      },
+    }
+
+    local saved = false
+    cache.save(old, function(ok)
+      saved = ok
+    end)
+    expect.equality(
+      vim.wait(3000, function()
+        return saved
+      end, 10),
+      true
+    )
+
+    local loaded = cache.load()
+    expect.equality(loaded.version, cache.VERSION)
+    expect.equality(count_entries(loaded.entries), 0)
   end)
 end
 

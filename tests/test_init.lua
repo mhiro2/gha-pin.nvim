@@ -1,6 +1,7 @@
 local MiniTest = require("mini.test")
 local expect = MiniTest.expect
 
+local cache = require("gha-pin.cache")
 local gha_pin = require("gha-pin")
 local github = require("gha-pin.github")
 local ui = require("gha-pin.ui")
@@ -116,6 +117,64 @@ T["setup: rerun closes existing auto-check timers"] = function()
   end)
 
   vim.uv.new_timer = orig_new_timer
+  if not ok then
+    error(err)
+  end
+end
+
+T["check: cooldown ignores fresh release cache with invalid publication time"] = function()
+  local sha = hex40("a")
+  local key = cache.key("https://api.github.com", "o", "r")
+  local orig_resolve_latest = github.resolve_latest
+
+  local ok, err = pcall(function()
+    for _, value in ipairs({
+      false,
+      "2000.999-01-01T00:00:00Z",
+      "2024-01-15T10:30:00.123.456Z",
+    }) do
+      cache.clear()
+      local data = { version = cache.VERSION, entries = {} }
+      cache.put(data, key, "v1.0.0", sha, value or nil, "release", sha)
+
+      local saved = false
+      cache.save(data, function(save_ok)
+        saved = save_ok
+      end)
+      expect.equality(
+        vim.wait(3000, function()
+          return saved
+        end, 10),
+        true
+      )
+
+      local network_calls = 0
+      github.resolve_latest = function(_cfg, _minimum_age, _owner, _repo, cb)
+        network_calls = network_calls + 1
+        cb(nil, "network reached")
+      end
+
+      gha_pin.setup({
+        auto_check = { enabled = false },
+        minimum_release_age_seconds = 3600,
+      })
+
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+        ("- uses: o/r@%s"):format(hex40("b")),
+      })
+      gha_pin.check(bufnr)
+      expect.equality(
+        vim.wait(100, function()
+          return network_calls == 1
+        end),
+        true
+      )
+    end
+  end)
+
+  github.resolve_latest = orig_resolve_latest
+  cache.clear()
   if not ok then
     error(err)
   end
