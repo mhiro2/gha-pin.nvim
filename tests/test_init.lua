@@ -2,6 +2,7 @@ local MiniTest = require("mini.test")
 local expect = MiniTest.expect
 
 local cache = require("gha-pin.cache")
+local fix = require("gha-pin.fix")
 local gha_pin = require("gha-pin")
 local diagnostic = require("gha-pin.diagnostic")
 local github = require("gha-pin.github")
@@ -10,6 +11,50 @@ local util = require("gha-pin.util")
 
 local function hex40(ch)
   return string.rep(ch, 40)
+end
+
+local COMPOSITE_STEP_LNUM = 4
+local COMPOSITE_STEP_ROW = 3
+
+local function composite_lines(...)
+  return vim.list_extend({ "runs:", "  using: composite", "  steps:" }, { ... })
+end
+
+local delayed_test_id = 0
+
+---@param fn fun(pending: {owner: string, repo: string, cb: fun(res: GhaPinGithubResult|nil, err: string|nil)}[])
+local function with_delayed_resolve_latest(fn)
+  local orig_resolve_latest = github.resolve_latest
+  local pending = {}
+  github.resolve_latest = function(_cfg, _min_age, owner, repo, cb)
+    table.insert(pending, { owner = owner, repo = repo, cb = cb })
+  end
+
+  delayed_test_id = delayed_test_id + 1
+  gha_pin.setup({
+    auto_check = { enabled = false },
+    github = {
+      api_base_url = ("https://delayed-%d.example.test"):format(delayed_test_id),
+      prefer_gh = false,
+    },
+  })
+
+  local ok, err = pcall(fn, pending)
+  github.resolve_latest = orig_resolve_latest
+  if not ok then
+    error(err)
+  end
+end
+
+---@param pending {cb: fun(res: GhaPinGithubResult|nil, err: string|nil)}
+---@param tag? string
+local function complete_resolve(pending, tag)
+  pending.cb({
+    latest_tag = tag or "v2.0.0",
+    latest_sha = hex40("b"),
+    source = "release",
+    published_at = nil,
+  }, nil)
 end
 
 local T = MiniTest.new_set()
@@ -299,6 +344,178 @@ T["fix: leaves uses-looking scalar content unchanged and does not resolve it"] =
   if not ok then
     error(err)
   end
+end
+
+T["fix: delayed callback applies only after resolution completes"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local old_sha = hex40("a")
+    local original = ("    - uses: actions/checkout@%s # v1.0.0"):format(old_sha)
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, composite_lines(original))
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    expect.equality(#pending, 1)
+    expect.equality(
+      vim.api.nvim_buf_get_lines(bufnr, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1]:find(old_sha, 1, true)
+        ~= nil,
+      true
+    )
+
+    complete_resolve(pending[1])
+    expect.equality(
+      vim.api.nvim_buf_get_lines(bufnr, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1],
+      ("    - uses: actions/checkout@%s # v2.0.0"):format(hex40("b"))
+    )
+  end)
+end
+
+T["fix: a second invocation supersedes the older operation"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local first_original = ("    - uses: actions/checkout@%s # v1.0.0"):format(hex40("a"))
+    local second_original = ("    - uses: actions/checkout@%s # v1.0.0"):format(hex40("a"))
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, composite_lines(first_original, second_original))
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM + 1, COMPOSITE_STEP_LNUM + 1)
+    -- Both Fix operations share the same in-flight repository request.
+    expect.equality(#pending, 1)
+
+    complete_resolve(pending[1])
+    local got = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    expect.equality(got[COMPOSITE_STEP_LNUM], first_original)
+    expect.equality(got[COMPOSITE_STEP_LNUM + 1], ("    - uses: actions/checkout@%s # v2.0.0"):format(hex40("b")))
+  end)
+end
+
+T["fix: an unrelated changedtick while resolving cancels every edit"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local target = ("    - uses: actions/checkout@%s # v1.0.0"):format(hex40("a"))
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, composite_lines(target, "unrelated: before"))
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    -- Keep the target slice byte-for-byte identical. This must be rejected by
+    -- the operation-level changedtick guard, not by apply_edits' slice guard.
+    vim.api.nvim_buf_set_lines(bufnr, COMPOSITE_STEP_ROW + 1, COMPOSITE_STEP_ROW + 2, false, {
+      "unrelated: user edit",
+    })
+    complete_resolve(pending[1])
+
+    expect.equality(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), composite_lines(target, "unrelated: user edit"))
+  end)
+end
+
+T["fix: an unmodifiable buffer cancels a delayed edit"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local original = ("    - uses: actions/checkout@%s"):format(hex40("a"))
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, composite_lines(original))
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    vim.bo[bufnr].modifiable = false
+    local ok = pcall(complete_resolve, pending[1])
+
+    expect.equality(ok, true)
+    expect.equality(vim.api.nvim_buf_get_lines(bufnr, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1], original)
+    vim.bo[bufnr].modifiable = true
+  end)
+end
+
+T["fix: wiping a buffer before resolution is safe"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(
+      bufnr,
+      0,
+      -1,
+      false,
+      composite_lines(("    - uses: actions/checkout@%s"):format(hex40("a")))
+    )
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    expect.equality(gha_pin._has_buffer_state(bufnr), true)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    expect.equality(vim.api.nvim_buf_is_valid(bufnr), false)
+    expect.equality(gha_pin._has_buffer_state(bufnr), false)
+    expect.equality(pcall(complete_resolve, pending[1]), true)
+  end)
+end
+
+T["fix: unloading a buffer before resolution is safe"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_lines(
+      bufnr,
+      0,
+      -1,
+      false,
+      composite_lines(("    - uses: actions/checkout@%s"):format(hex40("a")))
+    )
+
+    gha_pin.fix(bufnr, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    expect.equality(gha_pin._has_buffer_state(bufnr), true)
+    vim.api.nvim_buf_delete(bufnr, { force = true, unload = true })
+    expect.equality(vim.api.nvim_buf_is_valid(bufnr), true)
+    expect.equality(vim.api.nvim_buf_is_loaded(bufnr), false)
+    expect.equality(gha_pin._has_buffer_state(bufnr), false)
+    expect.equality(pcall(complete_resolve, pending[1]), true)
+  end)
+end
+
+T["resolve callbacks: cache miss fan-out and cache hit both isolate exceptions"] = function()
+  with_delayed_resolve_latest(function(pending)
+    local first = vim.api.nvim_create_buf(false, true)
+    local second = vim.api.nvim_create_buf(false, true)
+    local original = ("    - uses: actions/checkout@%s"):format(hex40("a"))
+    vim.api.nvim_buf_set_lines(first, 0, -1, false, composite_lines(original))
+    vim.api.nvim_buf_set_lines(second, 0, -1, false, composite_lines(original))
+
+    gha_pin.fix(first, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    gha_pin.fix(second, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    expect.equality(#pending, 1)
+
+    local orig_edit_for_ref = fix.edit_for_ref
+    local calls = 0
+    fix.edit_for_ref = function(...)
+      calls = calls + 1
+      if calls == 1 then
+        error("intentional callback failure")
+      end
+      return orig_edit_for_ref(...)
+    end
+
+    local ok, err = pcall(complete_resolve, pending[1])
+    fix.edit_for_ref = orig_edit_for_ref
+    if not ok then
+      error(err)
+    end
+
+    expect.equality(calls, 2)
+    expect.equality(vim.api.nvim_buf_get_lines(first, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1], original)
+    expect.equality(
+      vim.api.nvim_buf_get_lines(second, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1],
+      ("    - uses: actions/checkout@%s"):format(hex40("b"))
+    )
+
+    -- The completed miss populated the cache. Exercise the synchronous hit
+    -- path with the same failing consumer and ensure it cannot escape M.fix.
+    local cached = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(cached, 0, -1, false, composite_lines(original))
+    local cache_hit_calls = 0
+    fix.edit_for_ref = function()
+      cache_hit_calls = cache_hit_calls + 1
+      error("intentional cache-hit callback failure")
+    end
+    local cache_hit_ok, cache_hit_err = pcall(gha_pin.fix, cached, COMPOSITE_STEP_LNUM, COMPOSITE_STEP_LNUM)
+    fix.edit_for_ref = orig_edit_for_ref
+
+    expect.equality(cache_hit_ok, true)
+    expect.equality(cache_hit_err, nil)
+    expect.equality(cache_hit_calls, 1)
+    expect.equality(#pending, 1)
+    expect.equality(vim.api.nvim_buf_get_lines(cached, COMPOSITE_STEP_ROW, COMPOSITE_STEP_ROW + 1, false)[1], original)
+  end)
 end
 
 return T
