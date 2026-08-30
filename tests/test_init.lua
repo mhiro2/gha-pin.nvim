@@ -3,6 +3,7 @@ local expect = MiniTest.expect
 
 local cache = require("gha-pin.cache")
 local gha_pin = require("gha-pin")
+local diagnostic = require("gha-pin.diagnostic")
 local github = require("gha-pin.github")
 local ui = require("gha-pin.ui")
 local util = require("gha-pin.util")
@@ -60,7 +61,10 @@ T["check: virtual text shows cooldown for latest release"] = function()
 
   local bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    ("- uses: astral-sh/setup-uv@%s # v7.1.6"):format(hex40("a")),
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    ("    - uses: astral-sh/setup-uv@%s # v7.1.6"):format(hex40("a")),
   })
 
   gha_pin.check(bufnr)
@@ -161,7 +165,10 @@ T["check: cooldown ignores fresh release cache with invalid publication time"] =
 
       local bufnr = vim.api.nvim_create_buf(false, true)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-        ("- uses: o/r@%s"):format(hex40("b")),
+        "runs:",
+        "  using: composite",
+        "  steps:",
+        ("    - uses: o/r@%s"):format(hex40("b")),
       })
       gha_pin.check(bufnr)
       expect.equality(
@@ -175,6 +182,120 @@ T["check: cooldown ignores fresh release cache with invalid publication time"] =
 
   github.resolve_latest = orig_resolve_latest
   cache.clear()
+  if not ok then
+    error(err)
+  end
+end
+
+T["check: ordinary and ambiguous prose comments do not produce version diagnostics"] = function()
+  local orig_resolve_latest = github.resolve_latest
+  local latest_sha = hex40("b")
+  github.resolve_latest = function(_cfg, _min_age, _owner, _repo, cb)
+    cb({ latest_tag = "v4.2.0", latest_sha = latest_sha, source = "release", published_at = nil }, nil)
+  end
+
+  local ok, err = pcall(function()
+    gha_pin.setup({
+      auto_check = { enabled = false },
+      github = { api_base_url = "https://ambiguous-diagnostic.example.test" },
+    })
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      ("    - uses: ordinary-comment/action@%s # verify provenance"):format(latest_sha),
+      ("    - uses: ordinary-comment/action@%s # v2-factor authentication"):format(latest_sha),
+      ("    - uses: ordinary-comment/action@%s # v2FA is required"):format(latest_sha),
+    })
+
+    gha_pin.check(bufnr)
+    expect.equality(#vim.diagnostic.get(bufnr, { namespace = diagnostic.ns }), 0)
+  end)
+
+  github.resolve_latest = orig_resolve_latest
+  if not ok then
+    error(err)
+  end
+end
+
+T["fix: updates SHAs without changing ambiguous version prose"] = function()
+  local orig_resolve_latest = github.resolve_latest
+  local latest_sha = hex40("b")
+  github.resolve_latest = function(_cfg, _min_age, _owner, _repo, cb)
+    cb({ latest_tag = "v4.2.0", latest_sha = latest_sha, source = "release", published_at = nil }, nil)
+  end
+
+  local ok, err = pcall(function()
+    gha_pin.setup({
+      auto_check = { enabled = false },
+      github = { api_base_url = "https://ambiguous-fix.example.test" },
+    })
+
+    local old_sha = hex40("a")
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      ("    - uses: ambiguous-prose/action@%s # v2-factor authentication"):format(old_sha),
+      ("    - uses: ambiguous-prose/action@%s # v2FA is required"):format(old_sha),
+    })
+
+    gha_pin.fix(bufnr, 1, 5)
+
+    expect.equality(vim.api.nvim_buf_get_lines(bufnr, 3, 5, false), {
+      ("    - uses: ambiguous-prose/action@%s # v2-factor authentication"):format(latest_sha),
+      ("    - uses: ambiguous-prose/action@%s # v2FA is required"):format(latest_sha),
+    })
+  end)
+
+  github.resolve_latest = orig_resolve_latest
+  if not ok then
+    error(err)
+  end
+end
+
+T["fix: leaves uses-looking scalar content unchanged and does not resolve it"] = function()
+  local orig_resolve_latest = github.resolve_latest
+  local resolve_calls = 0
+  github.resolve_latest = function()
+    resolve_calls = resolve_calls + 1
+    error("scalar content must not be resolved")
+  end
+
+  local ok, err = pcall(function()
+    gha_pin.setup({ auto_check = { enabled = false } })
+
+    local sha = hex40("a")
+    local original = {
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      '    - run: "echo start',
+      ("      uses: actions/checkout@%s"):format(sha),
+      '      echo end"',
+      "    - run: !!str |",
+      ("        uses: actions/setup-node@%s"):format(sha),
+      "    - run: &script |",
+      ("        - uses: actions/cache@%s"):format(sha),
+      "    - run: !custom >-",
+      ("        uses: actions/upload-artifact@%s"):format(sha),
+      "    - {",
+      ("        uses: actions/github-script@%s"):format(sha),
+      "      }",
+    }
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, original)
+
+    gha_pin.fix(bufnr, 1, #original)
+
+    expect.equality(resolve_calls, 0)
+    expect.equality(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), original)
+  end)
+
+  github.resolve_latest = orig_resolve_latest
   if not ok then
     error(err)
   end

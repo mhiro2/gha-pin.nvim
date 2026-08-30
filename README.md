@@ -6,7 +6,7 @@
 Inspect and update **pinned SHAs** in GitHub Actions workflows (`uses: owner/repo@<full-commit-sha>`) directly from Neovim.
 
 This plugin is lightweight and practical for day-to-day use.
-It parses workflow/action files line-by-line (not a full YAML parser) and is not intended to replace Dependabot/Renovate.
+It uses a lightweight, indentation-aware scanner for workflow/action files (not a full YAML parser) and is not intended to replace Dependabot/Renovate.
 
 ## 💡 Motivation
 
@@ -109,13 +109,31 @@ require("gha-pin").setup({
 ### 🧩 Supported patterns
 
 - Included:
-  - `uses: owner/repo@<full-commit-sha>`
-  - `uses: owner/repo/path@<full-commit-sha>`
+  - step mappings such as `- uses: owner/repo@<full-commit-sha>`
+  - multi-line step mappings with `uses: owner/repo/path@<full-commit-sha>`
+  - reusable workflow jobs at `jobs.<job_id>.uses`
+  - composite action steps at `runs.steps[*].uses`
+  - exact plain, single-quoted, or double-quoted block mapping keys (`uses:`, `'uses':`, and `"uses":`)
+  - indentationless block sequences under `steps:`
 - Ignored:
   - `uses: ./path`
   - `uses: docker://...`
   - any `uses:` containing `${{ }}` (dynamic expressions)
   - tag refs like `@v4` (not supported yet)
+  - `uses:`-looking text in comments, multi-line quoted/plain scalars, and block scalars (including tagged/anchored forms such as `!!str |`, `&script |`, and `!custom >-`)
+  - non-action mappings such as `env.uses`
+  - similar keys such as `foo-uses:`
+  - flow-style mappings such as `steps: [{ uses: ... }]` (intentionally unsupported by the lightweight scanner)
+  - isolated `- uses:` fragments outside `jobs.<job_id>.steps`, `jobs.<job_id>.uses`, or `runs.steps`
+
+Only an unambiguous version marker immediately following a `uses` value is managed:
+
+```yaml
+- uses: actions/checkout@<full-commit-sha> # v4.2.0
+- uses: actions/checkout@<full-commit-sha> # v 4.2.0
+```
+
+Plain managed versions contain only dot-separated numeric components, such as `v4`, `v4.2`, or `v4.2.1`. Prerelease/build suffixes are accepted only after a complete three-component core, for example `v4.2.1-rc.1` or `v4.2.1+build.5`; their dot-separated identifiers use ASCII letters, digits, and internal hyphens, and must start and end with an alphanumeric character. Resolved release tags may omit the leading `v`, but must otherwise follow the same grammar before a version comment can be updated. Ambiguous prose such as `# v2-factor authentication` and `# v2FA is required` is never managed. A trailing separator or punctuation belongs to the user's comment: updating `# v2. keep this` preserves `. keep this` verbatim. Ordinary comments such as `# verify provenance` are also never rewritten.
 
 ## ⚙️ Configuration
 
