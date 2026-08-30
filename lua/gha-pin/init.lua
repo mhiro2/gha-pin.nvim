@@ -45,7 +45,7 @@ local state = {
   cfg = nil,
   ---@type GhaPinCache
   cache = nil,
-  ---@type table<integer, {gen: integer, refs: GhaPinUsesRef[]|nil, repo: table<string, GhaPinGithubResult>|nil, err: table<string, string>|nil}>
+  ---@type table<integer, {gen: integer, fix_gen: integer|nil, refs: GhaPinUsesRef[]|nil, repo: table<string, GhaPinGithubResult>|nil, err: table<string, string>|nil}>
   by_buf = {},
   ---@type table<string, {cbs: fun(res: GhaPinGithubResult|nil, err: string|nil)[]}>
   inflight = {},
@@ -247,6 +247,32 @@ function M._is_target_file(path)
   return is_workflow_file(path)
 end
 
+-- Internal read-only state probe used by lifecycle tests.
+---@param bufnr integer
+---@return boolean
+function M._has_buffer_state(bufnr)
+  return state.by_buf[bufnr] ~= nil
+end
+
+---@param owner string
+---@param repo string
+---@param cb fun(res: GhaPinGithubResult|nil, err: string|nil)
+---@param res GhaPinGithubResult|nil
+---@param err string|nil
+local function invoke_resolve_callback(owner, repo, cb, res, err)
+  local ok, callback_err = pcall(cb, res, err)
+  if not ok then
+    -- Keep error rendering inside the protected call too: Lua permits error
+    -- objects with a failing __tostring metamethod.
+    pcall(function()
+      util.notify(
+        ("Resolve callback failed for %s/%s: %s"):format(owner, repo, tostring(callback_err)),
+        vim.log.levels.WARN
+      )
+    end)
+  end
+end
+
 ---@param key string
 ---@param owner string
 ---@param repo string
@@ -254,11 +280,11 @@ end
 local function resolve_repo(key, owner, repo, cb)
   -- Validate owner/repo to prevent command injection
   if not is_valid_owner_or_repo(owner) then
-    cb(nil, ("Invalid owner name: %s"):format(owner))
+    invoke_resolve_callback(owner, repo, cb, nil, ("Invalid owner name: %s"):format(owner))
     return
   end
   if not is_valid_owner_or_repo(repo) then
-    cb(nil, ("Invalid repo name: %s"):format(repo))
+    invoke_resolve_callback(owner, repo, cb, nil, ("Invalid repo name: %s"):format(repo))
     return
   end
   local entry = cache.get_if_fresh(state.cache, key, state.cfg.ttl_seconds)
@@ -279,7 +305,7 @@ local function resolve_repo(key, owner, repo, cb)
       end
 
       if can_use then
-        cb({
+        invoke_resolve_callback(owner, repo, cb, {
           latest_tag = entry.latest_tag,
           latest_sha = latest_sha,
           resolved_sha = resolved_sha,
@@ -308,7 +334,7 @@ local function resolve_repo(key, owner, repo, cb)
     local cbs = state.inflight[key] and state.inflight[key].cbs or {}
     state.inflight[key] = nil
     for _, f in ipairs(cbs) do
-      f(res, err)
+      invoke_resolve_callback(owner, repo, f, res, err)
     end
   end)
 end
@@ -472,6 +498,38 @@ function M.check(bufnr)
 end
 
 ---@param bufnr integer
+---@param buffer_state table
+---@param fix_gen integer
+---@param changedtick integer
+---@return boolean current
+---@return string|nil reason
+local function is_current_fix(bufnr, buffer_state, fix_gen, changedtick)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return false, "buffer is no longer valid"
+  end
+  if not vim.api.nvim_buf_is_loaded(bufnr) then
+    return false, "buffer is no longer loaded"
+  end
+  if state.by_buf[bufnr] ~= buffer_state or buffer_state.fix_gen ~= fix_gen then
+    return false, "superseded"
+  end
+  if not vim.bo[bufnr].modifiable then
+    return false, "buffer is not modifiable"
+  end
+  if vim.api.nvim_buf_get_changedtick(bufnr) ~= changedtick then
+    return false, "buffer changed while resolving"
+  end
+  return true, nil
+end
+
+---@param reason string|nil
+local function notify_fix_cancelled(reason)
+  if reason and reason ~= "superseded" then
+    util.notify(("Fix cancelled: %s; nothing was updated"):format(reason), vim.log.levels.WARN)
+  end
+end
+
+---@param bufnr integer
 ---@param line1 integer 1-based
 ---@param line2 integer 1-based
 ---@return nil
@@ -482,6 +540,25 @@ function M.fix(bufnr, line1, line2)
   end
 
   bufnr = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    notify_fix_cancelled("buffer is no longer valid")
+    return
+  end
+  if not vim.api.nvim_buf_is_loaded(bufnr) then
+    notify_fix_cancelled("buffer is no longer loaded")
+    return
+  end
+  if not vim.bo[bufnr].modifiable then
+    notify_fix_cancelled("buffer is not modifiable")
+    return
+  end
+
+  local b = state.by_buf[bufnr] or { gen = 0 }
+  b.fix_gen = (b.fix_gen or 0) + 1
+  state.by_buf[bufnr] = b
+  local fix_gen = b.fix_gen
+  local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
   local refs = parser.parse_buf(bufnr)
   if #refs == 0 then
     util.notify("No pinned `uses:` found in buffer", vim.log.levels.INFO)
@@ -502,6 +579,12 @@ function M.fix(bufnr, line1, line2)
   end
 
   resolve_for_refs(filtered, function(repo_result, repo_err)
+    local current, reason = is_current_fix(bufnr, b, fix_gen, changedtick)
+    if not current then
+      notify_fix_cancelled(reason)
+      return
+    end
+
     local edits = {}
     local sha_edit_count = 0
     local comment_edit_count = 0
@@ -528,6 +611,12 @@ function M.fix(bufnr, line1, line2)
       end
     end
 
+    current, reason = is_current_fix(bufnr, b, fix_gen, changedtick)
+    if not current then
+      notify_fix_cancelled(reason)
+      return
+    end
+
     if #edits == 0 then
       if failed_repo_count > 0 then
         util.notify(
@@ -541,7 +630,11 @@ function M.fix(bufnr, line1, line2)
       return
     end
 
-    fix.apply_edits(bufnr, edits)
+    local applied, apply_err = fix.apply_edits(bufnr, edits)
+    if not applied then
+      notify_fix_cancelled(apply_err)
+      return
+    end
     if failed_repo_count > 0 then
       if sha_edit_count == 0 and comment_edit_count > 0 then
         util.notify(
