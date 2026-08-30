@@ -4,6 +4,8 @@ local M = {}
 
 M.ns = vim.api.nvim_create_namespace("gha-pin.nvim.ui")
 
+local supports_extmark_invalidate = vim.fn.has("nvim-0.10") == 1
+
 ---@class GhaPinVirtItem
 ---@field lnum integer
 ---@field text string
@@ -30,18 +32,21 @@ function M.set_virtual_text(bufnr, items, enabled)
   for _, it in ipairs(items) do
     if it.text and it.text ~= "" and it.lnum >= 0 and it.lnum < line_count then
       local line = vim.api.nvim_buf_get_lines(bufnr, it.lnum, it.lnum + 1, false)[1] or ""
-      -- Span the extmark across the whole line and mark it `invalidate`-able
-      -- so that deleting the `uses:` line drops the extmark instead of
-      -- pulling it onto the following line (e.g. a `with:` line below).
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, it.lnum, 0, {
+      -- Span the extmark across the whole line. Neovim >= 0.10 can invalidate
+      -- it when the `uses:` line is deleted; older versions still render the
+      -- virtual text and clear/rebuild it on the next check.
+      local opts = {
         end_row = it.lnum,
         end_col = #line,
         virt_text = { { it.text, "Comment" } },
         virt_text_pos = "eol",
         hl_mode = "combine",
-        invalidate = true,
-        undo_restore = false,
-      })
+      }
+      if supports_extmark_invalidate then
+        opts.invalidate = true
+        opts.undo_restore = false
+      end
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, it.lnum, 0, opts)
     end
   end
 end

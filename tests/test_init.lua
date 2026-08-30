@@ -77,11 +77,12 @@ T["check: virtual text shows cooldown for latest release"] = function()
 end
 
 T["setup: rerun closes existing auto-check timers"] = function()
-  local orig_new_timer = vim.uv.new_timer
+  local uv = vim.uv or vim.loop
+  local orig_new_timer = uv.new_timer
 
   ---@type { stopped: integer, closed: integer, started: integer }[]
   local created = {}
-  vim.uv.new_timer = function()
+  uv.new_timer = function()
     local timer = { stopped = 0, closed = 0, started = 0 }
     function timer:start(_ms, _repeat_ms, _cb)
       self.started = self.started + 1
@@ -115,7 +116,39 @@ T["setup: rerun closes existing auto-check timers"] = function()
     expect.equality(created[1].closed >= 1, true)
   end)
 
-  vim.uv.new_timer = orig_new_timer
+  uv.new_timer = orig_new_timer
+  if not ok then
+    error(err)
+  end
+end
+
+T["auto-check: debounce timer runs with the available libuv alias"] = function()
+  local orig_check = gha_pin.check
+  local checked_bufnr = nil
+
+  gha_pin.check = function(bufnr)
+    checked_bufnr = bufnr
+  end
+
+  local ok, err = pcall(function()
+    gha_pin.setup({
+      auto_check = { enabled = true, debounce_ms = 5 },
+    })
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(bufnr, vim.fn.tempname() .. "/.github/workflows/ci.yml")
+    vim.api.nvim_exec_autocmds("BufEnter", { buffer = bufnr })
+
+    local done = vim.wait(1000, function()
+      return checked_bufnr ~= nil
+    end, 10)
+    expect.equality(done, true)
+    expect.equality(checked_bufnr, bufnr)
+
+    gha_pin.setup({ auto_check = { enabled = false } })
+  end)
+
+  gha_pin.check = orig_check
   if not ok then
     error(err)
   end

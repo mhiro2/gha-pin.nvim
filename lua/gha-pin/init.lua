@@ -14,6 +14,8 @@ local util = require("gha-pin.util")
 ---@field cache_clear fun()
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 ---@class GhaPinConfig
 ---@field enabled boolean
 ---@field virtual_text boolean
@@ -702,7 +704,7 @@ function M.setup(cfg)
             timer:stop()
           end)
         else
-          timer = vim.uv.new_timer()
+          timer = uv.new_timer()
           state.timers[args.buf] = timer
         end
         timer:start(ms, 0, function()

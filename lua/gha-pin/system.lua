@@ -1,5 +1,7 @@
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 ---@class GhaPinSystemResult
 ---@field code integer
 ---@field stdout string
@@ -32,31 +34,29 @@ function M.run(cmd, cb, opts)
   local stdout = {}
   local stderr = {}
   local timer = nil
-  local timed_out = false
+  local finished = false
+  local timeout_requested = false
   local jobid = nil
 
-  local function cleanup()
-    if timer then
-      timer:close()
-      timer = nil
+  local function close_timer()
+    local current = timer
+    timer = nil
+    if current then
+      pcall(current.stop, current)
+      pcall(current.close, current)
     end
   end
 
-  local function schedule_result(code, out, err)
-    cleanup()
+  local function finish(code, out, err)
+    if finished then
+      return
+    end
+    finished = true
+    close_timer()
     vim.schedule(function()
       cb({ code = code, stdout = out, stderr = err })
     end)
   end
-
-  timer = vim.uv.new_timer()
-  timer:start(timeout, 0, function()
-    timed_out = true
-    if type(jobid) == "number" and jobid > 0 then
-      vim.fn.jobstop(jobid)
-    end
-    schedule_result(124, "", string.format("Command timed out after %d ms", timeout))
-  end)
 
   jobid = vim.fn.jobstart(cmd, {
     stdout_buffered = true,
@@ -80,19 +80,43 @@ function M.run(cmd, cb, opts)
       end
     end,
     on_exit = function(_, code)
-      if timed_out then
+      if timeout_requested then
         return
       end
-      schedule_result(code or 0, table.concat(stdout, "\n"), table.concat(stderr, "\n"))
+      finish(code or 0, table.concat(stdout, "\n"), table.concat(stderr, "\n"))
     end,
   })
 
   if type(jobid) ~= "number" or jobid <= 0 then
-    cleanup()
-    vim.schedule(function()
-      cb({ code = 1, stdout = "", stderr = "Failed to start job" })
-    end)
+    finish(1, "", "Failed to start job")
+    return
   end
+
+  timer = uv.new_timer()
+  if not timer then
+    pcall(vim.fn.jobstop, jobid)
+    finish(1, "", "Failed to create timeout timer")
+    return
+  end
+
+  timer:start(timeout, 0, function()
+    if finished or timeout_requested then
+      return
+    end
+
+    -- libuv timer callbacks run in a fast-event context. Reserve the timeout
+    -- result here, then schedule all vim.fn calls back onto the main loop.
+    timeout_requested = true
+    vim.schedule(function()
+      if finished then
+        return
+      end
+      if type(jobid) == "number" and jobid > 0 then
+        pcall(vim.fn.jobstop, jobid)
+      end
+      finish(124, "", string.format("Command timed out after %d ms", timeout))
+    end)
+  end)
 end
 
 return M

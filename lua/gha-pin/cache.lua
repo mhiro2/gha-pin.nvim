@@ -2,6 +2,8 @@ local util = require("gha-pin.util")
 
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 local save_queue = {
   running = false,
   pending = false,
@@ -37,7 +39,7 @@ end
 local function schedule_notify(msg, level)
   -- `vim.notify` ultimately calls `nvim_echo`, which is disallowed in a fast
   -- event context (e.g. libuv callbacks). Defer to the main loop so writes
-  -- triggered from `vim.uv.fs_*` callbacks do not crash on nightly Neovim.
+  -- triggered from libuv callbacks do not crash on nightly Neovim.
   vim.schedule(function()
     vim.notify(msg, level)
   end)
@@ -95,7 +97,7 @@ local function save_once(cache, cb)
     return
   end
 
-  local fs = vim.uv
+  local fs = uv
   if not fs then
     -- Fallback to sync write if libuv is not available
     vim.fn.mkdir(cache_dir(), "p")
@@ -200,7 +202,7 @@ end
 ---@param cache GhaPinCache
 ---@param cb? fun(ok: boolean, err?: string)
 function M.save(cache, cb)
-  -- Create the cache directory here on the main loop. `vim.uv.fs_mkdir`
+  -- Create the cache directory here on the main loop. `uv.fs_mkdir`
   -- is not recursive, and `vim.fn.mkdir` cannot be called from the
   -- libuv callbacks that re-drive the queue, so doing it once up front
   -- guarantees `save_once` only has to perform async writes.
