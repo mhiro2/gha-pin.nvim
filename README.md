@@ -92,16 +92,18 @@ require("gha-pin").setup({
 })
 ```
 
-- **Behavior**: If the latest release's tag is newer than the configured age, it's treated as "not eligible yet" (no diagnostic shown).
+- **Behavior**: If the latest release was published more recently than the configured age, it's treated as "not eligible yet" (no diagnostic shown).
 - **Default**: `0` (disabled) - all releases are immediately eligible.
 - **Notes**:
   - Only applies to releases (from `/releases/latest`), not tags fallback.
-  - Uses the tag's `tagger.date` for annotated tags; for lightweight tags it uses the commit date (`commit.committer.date`, fallback to `commit.author.date`).
+  - Uses the release's `published_at` value. The tag or commit creation date is not used as a substitute.
+  - Missing or invalid release publication metadata fails closed: the plugin leaves the current pin unchanged.
   - Repos without releases (tags fallback) are always eligible.
 
 ### ⚠️ Failure behavior
 
 - If resolution fails (network/auth/rate limit/etc.), the plugin will **not** add "outdated" diagnostics for that `uses:`.
+- Once a latest release is selected, failure to resolve that release's tag is returned as an error; the plugin does not silently select another tag.
 - Virtual text may show `# Latest: (resolve failed)`. Use `:GhaPinExplain` to see the error.
 
 ### 🧩 Supported patterns

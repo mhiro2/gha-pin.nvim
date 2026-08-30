@@ -88,13 +88,12 @@ ttl_seconds (integer, default: 21600)
   Cache TTL in seconds.
 
 minimum_release_age_seconds (integer, default: 0)
-  Optional cooldown period for releases. If the latest release's tag is newer
-  than this age (in seconds), it's treated as "not eligible yet" and no
-  diagnostic is shown. Default 0 means disabled - all releases are immediately
-  eligible. Only applies to releases (from /releases/latest), not tags fallback.
-  Uses the tag's tagger.date for annotated tags; for lightweight tags it uses
-  the commit date (commit.committer.date, fallback to commit.author.date).
-  Repos without releases are always eligible.
+  Optional cooldown period for releases. If the latest release was published
+  more recently than this age (in seconds), it is treated as "not eligible
+  yet" and no diagnostic is shown. Default 0 means disabled. This uses the
+  release response's published_at value and does not substitute tag or commit
+  dates. Missing or invalid publication metadata fails closed. The cooldown
+  does not apply to the tags fallback used for repositories without releases.
 
 github.api_base_url (string, default: https://api.github.com)
   GitHub API base URL (supports GHE if compatible with the endpoints used).
@@ -135,7 +134,9 @@ The cache stores only:
   - repo identifier
   - resolved latest tag (if any)
   - resolved latest commit SHA
-  - timestamp
+  - resolution source (release or tags)
+  - release publication time (if any)
+  - last checked timestamp
 
 Tokens are never written to disk.
 
@@ -149,6 +150,9 @@ Resolution strategy:
        - if annotated tag, resolve via GET /repos/.../git/tags/{sha}
   2) fallback: tags list
      GET /repos/{owner}/{repo}/tags?per_page=1
+     This fallback is used only when /releases/latest returns 404. Once a
+     release is selected, failure to resolve its tag is not replaced by a
+     different tag.
 
 Failure behavior:
   - If resolution fails (network/auth/rate limit/etc.), the plugin does not

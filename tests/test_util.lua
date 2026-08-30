@@ -56,6 +56,20 @@ T["timestamp_age_seconds: invalid formats return 0"] = function()
   expect.equality(util.timestamp_age_seconds(""), 0)
   expect.equality(util.timestamp_age_seconds("2024-01-01T00:00:00"), 0)
   expect.equality(util.timestamp_age_seconds("not-a-timestamp"), 0)
+  expect.equality(util.timestamp_age_seconds("2000.999-01-01T00:00:00Z"), 0)
+  expect.equality(util.timestamp_age_seconds("2024-01-15T10:30:00.123.456Z"), 0)
+end
+
+T["is_iso8601_timestamp: validates release timestamps"] = function()
+  local util = load_util_fresh()
+  expect.equality(util.is_iso8601_timestamp("2024-02-29T10:30:00Z"), true)
+  expect.equality(util.is_iso8601_timestamp("2024-01-15T10:30:00.123+09:00"), true)
+  expect.equality(util.is_iso8601_timestamp("2023-02-29T10:30:00Z"), false)
+  expect.equality(util.is_iso8601_timestamp("2024-13-15T10:30:00Z"), false)
+  expect.equality(util.is_iso8601_timestamp("not-a-timestamp"), false)
+  expect.equality(util.is_iso8601_timestamp("2000.999-01-01T00:00:00Z"), false)
+  expect.equality(util.is_iso8601_timestamp("2024-01-15T10:30:00.123.456Z"), false)
+  expect.equality(util.is_iso8601_timestamp(nil), false)
 end
 
 T["timestamp_age_seconds: returns negative age for future timestamps"] = function()
