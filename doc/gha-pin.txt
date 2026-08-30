@@ -119,14 +119,42 @@ auto_check.debounce_ms (integer, default: 700)
 4. SUPPORTED PATTERNS                                   *gha-pin-patterns*
 
 Included:
-  - uses: owner/repo@<full-commit-sha>
-  - uses: owner/repo/path@<full-commit-sha>
+  - step mappings: - uses: owner/repo@<full-commit-sha>
+  - multi-line step mappings: uses: owner/repo/path@<full-commit-sha>
+  - reusable workflow jobs at jobs.<job_id>.uses
+  - composite action steps at runs.steps[*].uses
+  - exact block keys uses:, 'uses':, and "uses":
+  - indentationless block sequences under steps:
 
 Ignored:
   - uses: ./path
   - uses: docker://...
   - uses: ...@${{ ... }}   (dynamic)
   - uses: owner/repo@v4    (tag refs not supported yet)
+  - uses-looking text in comments and multi-line quoted/plain scalars
+  - block scalar content, including !!str |, &script |, and !custom >-
+  - non-action mappings such as env.uses and similar keys like foo-uses:
+  - flow mappings such as steps: [{ uses: ... }] (intentionally unsupported)
+  - isolated - uses: fragments outside jobs.*.steps, jobs.*.uses, or
+    runs.steps
+
+Version comments:
+  Only an unambiguous version marker immediately following a uses value is
+  managed. Supported marker forms include:
+
+    # v4.2.0
+    # v 4.2.0
+
+  Plain managed versions contain only dot-separated numeric components, such
+  as v4, v4.2, or v4.2.1. Prerelease/build suffixes require a complete
+  three-component core, for example v4.2.1-rc.1 or v4.2.1+build.5. Suffix
+  identifiers are dot-separated, use ASCII letters, digits, and internal
+  hyphens, and start and end with an alphanumeric character. Resolved release
+  tags may omit the leading v but otherwise follow the same grammar. Ambiguous
+  prose such as "# v2-factor authentication" and "# v2FA is required" is
+  never managed. Trailing separators and punctuation are user text: updating
+  "# v2. keep this" preserves ". keep this" verbatim. Ordinary comments such
+  as "# verify provenance" are also never rewritten.
 
 ==============================================================================
 5. CACHE                                                   *gha-pin-cache*
@@ -172,7 +200,10 @@ Transport priority:
 ==============================================================================
 7. NOTES / LIMITATIONS                                     *gha-pin-notes*
 
-- YAML parsing is line-based; this is not a full YAML parser.
+- YAML parsing uses a lightweight indentation-aware scanner; this is not a
+  full YAML parser.
+- Flow-style mappings are deliberately ignored; only supported block contexts
+  are scanned, and ambiguous scalar regions fail closed.
 - Inline comments are stripped with a simple heuristic.
 - The plugin does not map pinned SHA -> exact release/tag.
 - Tag refs like `@v4` are not supported (tag -> SHA conversion).

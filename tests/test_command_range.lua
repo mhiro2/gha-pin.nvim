@@ -37,27 +37,30 @@ T["command: with range only updates specified lines"] = function()
 
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-      ("    - uses: actions/checkout@%s"):format(OLD_SHA), -- line 1
-      ("    - uses: actions/setup-node@%s"):format(OLD_SHA), -- line 2 (in range)
-      ("    - uses: actions/upload-artifact@%s"):format(OLD_SHA), -- line 3 (in range)
+      "runs:",
+      "  using: composite",
+      "  steps:",
       ("    - uses: actions/checkout@%s"):format(OLD_SHA), -- line 4
+      ("    - uses: actions/setup-node@%s"):format(OLD_SHA), -- line 5 (in range)
+      ("    - uses: actions/upload-artifact@%s"):format(OLD_SHA), -- line 6 (in range)
+      ("    - uses: actions/checkout@%s"):format(OLD_SHA), -- line 7
     })
     vim.api.nvim_set_current_buf(bufnr)
 
-    -- Fix only lines 2-3 (1-based)
-    vim.api.nvim_command("2,3GhaPinFix")
+    -- Fix only lines 5-6 (1-based)
+    vim.api.nvim_command("5,6GhaPinFix")
 
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-    -- Line 1: NOT updated (outside range)
-    expect.equality(lines[1]:find(OLD_SHA, 1, true) ~= nil, true)
-
-    -- Lines 2-3: updated (within range)
-    expect.equality(lines[2]:find(NEW_SHA, 1, true) ~= nil, true)
-    expect.equality(lines[3]:find(NEW_SHA, 1, true) ~= nil, true)
-
     -- Line 4: NOT updated (outside range)
     expect.equality(lines[4]:find(OLD_SHA, 1, true) ~= nil, true)
+
+    -- Lines 5-6: updated (within range)
+    expect.equality(lines[5]:find(NEW_SHA, 1, true) ~= nil, true)
+    expect.equality(lines[6]:find(NEW_SHA, 1, true) ~= nil, true)
+
+    -- Line 7: NOT updated (outside range)
+    expect.equality(lines[7]:find(OLD_SHA, 1, true) ~= nil, true)
   end)
 end
 
@@ -70,6 +73,9 @@ T["command: without range updates all lines"] = function()
 
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "runs:",
+      "  using: composite",
+      "  steps:",
       ("    - uses: actions/checkout@%s"):format(OLD_SHA),
       ("    - uses: actions/setup-node@%s"):format(OLD_SHA),
     })
@@ -79,8 +85,8 @@ T["command: without range updates all lines"] = function()
     vim.api.nvim_command("GhaPinFix")
 
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    expect.equality(lines[1]:find(NEW_SHA, 1, true) ~= nil, true)
-    expect.equality(lines[2]:find(NEW_SHA, 1, true) ~= nil, true)
+    expect.equality(lines[4]:find(NEW_SHA, 1, true) ~= nil, true)
+    expect.equality(lines[5]:find(NEW_SHA, 1, true) ~= nil, true)
   end)
 end
 

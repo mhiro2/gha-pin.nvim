@@ -393,24 +393,17 @@ local function render(bufnr, refs, repo_result, repo_err)
 
       -- Version comment mismatch diagnostic (only if line has a "# v..." comment)
       if latest.latest_tag and r.raw then
-        local want_version = tostring(latest.latest_tag):match("^v(.+)$") or tostring(latest.latest_tag)
-        local after_token = r.raw:sub(r.col_end + 1)
-        local s1, e1 = after_token:find("#%s*v%s*[^%s]+")
-        if s1 and e1 then
-          local have_version = after_token:sub(s1, e1):match("#%s*v%s*([^%s]+)")
-          if have_version and have_version ~= want_version then
-            local line_len = #r.raw
-            local start0 = r.col_end + s1 - 1
-            local end0 = math.min(r.col_end + e1, line_len)
-            table.insert(outdated, {
-              lnum = r.lnum,
-              col_start = start0,
-              col_end = end0,
-              latest_tag = latest.latest_tag,
-              latest_sha = latest.latest_sha,
-              kind = "comment",
-            })
-          end
+        local tag = fix.version_tag(latest.latest_tag)
+        local comment = fix.version_comment(r)
+        if tag and comment and comment.version ~= tag.version then
+          table.insert(outdated, {
+            lnum = r.lnum,
+            col_start = comment.col_start,
+            col_end = comment.col_end,
+            latest_tag = latest.latest_tag,
+            latest_sha = latest.latest_sha,
+            kind = "comment",
+          })
         end
       end
 
