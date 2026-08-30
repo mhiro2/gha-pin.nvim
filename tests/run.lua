@@ -16,8 +16,11 @@ T["cache"] = require("tests.test_cache")
 T["fix"] = require("tests.test_fix")
 T["command_range"] = require("tests.test_command_range")
 T["github"] = require("tests.test_github")
+T["health"] = require("tests.test_health")
 T["init"] = require("tests.test_init")
+T["system"] = require("tests.test_system")
 T["util"] = require("tests.test_util")
+T["version"] = require("tests.test_version")
 
 local M = {}
 

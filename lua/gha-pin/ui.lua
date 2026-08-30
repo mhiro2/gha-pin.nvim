@@ -33,7 +33,7 @@ function M.set_virtual_text(bufnr, items, enabled)
       -- Span the extmark across the whole line and mark it `invalidate`-able
       -- so that deleting the `uses:` line drops the extmark instead of
       -- pulling it onto the following line (e.g. a `with:` line below).
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, it.lnum, 0, {
+      vim.api.nvim_buf_set_extmark(bufnr, M.ns, it.lnum, 0, {
         end_row = it.lnum,
         end_col = #line,
         virt_text = { { it.text, "Comment" } },

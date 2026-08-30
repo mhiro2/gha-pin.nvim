@@ -44,12 +44,7 @@ end
 ---@return any|nil
 ---@return string|nil
 local function decode_json(body)
-  local ok, decoded = pcall(function()
-    if vim.json and vim.json.decode then
-      return vim.json.decode(body)
-    end
-    return vim.fn.json_decode(body)
-  end)
+  local ok, decoded = pcall(vim.json.decode, body)
   if not ok then
     return nil, "Failed to decode JSON"
   end

@@ -5,6 +5,7 @@ local github = require("gha-pin.github")
 local parser = require("gha-pin.parser")
 local ui = require("gha-pin.ui")
 local util = require("gha-pin.util")
+local version = require("gha-pin.version")
 
 ---@class GhaPin
 ---@field setup fun(cfg: GhaPinConfig|nil)
@@ -659,6 +660,8 @@ end
 ---@param cfg GhaPinConfig|nil
 ---@return nil
 function M.setup(cfg)
+  version.assert_supported()
+
   -- Re-running setup should fully reset autocmd-timer state to avoid leaked handles.
   clear_all_timers()
   state.by_buf = {}

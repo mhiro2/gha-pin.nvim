@@ -17,6 +17,10 @@ CONTENTS                                                       *gha-pin*
 gha-pin.nvim inspects GitHub Actions workflow files and helps you keep
 pinned SHAs up-to-date.
 
+Requirements:
+
+- Neovim 0.10.0 or newer
+
 This plugin focuses on this pattern only:
 
   uses: owner/repo@<full-commit-sha>

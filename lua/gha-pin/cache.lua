@@ -43,24 +43,6 @@ local function schedule_notify(msg, level)
   end)
 end
 
----@param s string
----@return any
-local function json_decode(s)
-  if vim.json and vim.json.decode then
-    return vim.json.decode(s)
-  end
-  return vim.fn.json_decode(s)
-end
-
----@param t any
----@return string
-local function json_encode(t)
-  if vim.json and vim.json.encode then
-    return vim.json.encode(t)
-  end
-  return vim.fn.json_encode(t)
-end
-
 ---@return GhaPinCache
 function M.load()
   local path = cache_file()
@@ -69,7 +51,7 @@ function M.load()
     return { version = 1, entries = {} }
   end
 
-  local ok2, decoded = pcall(json_decode, table.concat(lines, "\n"))
+  local ok2, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not ok2 or type(decoded) ~= "table" then
     if not ok2 then
       vim.notify("gha-pin.nvim: Failed to decode cache file, using empty cache", vim.log.levels.WARN)
@@ -86,7 +68,7 @@ end
 ---@param cb? fun(ok: boolean, err?: string)
 local function save_once(cache, cb)
   local path = cache_file()
-  local ok, encoded = pcall(json_encode, cache)
+  local ok, encoded = pcall(vim.json.encode, cache)
   if not ok then
     vim.notify(("gha-pin.nvim: Failed to encode cache: %s"):format(tostring(encoded)), vim.log.levels.WARN)
     if cb then
@@ -96,18 +78,6 @@ local function save_once(cache, cb)
   end
 
   local fs = vim.uv
-  if not fs then
-    -- Fallback to sync write if libuv is not available
-    vim.fn.mkdir(cache_dir(), "p")
-    local ok2, err = pcall(vim.fn.writefile, { encoded }, path)
-    if not ok2 then
-      vim.notify(("gha-pin.nvim: Failed to write cache: %s"):format(tostring(err)), vim.log.levels.WARN)
-    end
-    if cb then
-      cb(ok2, ok2 and nil or tostring(err))
-    end
-    return
-  end
 
   -- Write to temporary file first (atomic write pattern). The cache
   -- directory is created in `M.save` on the main loop, so we do not
